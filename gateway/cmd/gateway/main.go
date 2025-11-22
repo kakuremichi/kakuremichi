@@ -69,10 +69,30 @@ func main() {
 		slog.Info("WireGuard interface initialized", "public_key", wg.PublicKey())
 	}
 
-	// Initialize HTTP proxy
+	// Initialize HTTP proxy with ACME configuration
 	httpAddr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	httpsAddr := fmt.Sprintf(":%d", cfg.HTTPSPort)
-	httpProxy := proxy.NewHTTPProxy(httpAddr, httpsAddr)
+
+	// Configure ACME (enabled if email is provided and not default)
+	acmeEnabled := cfg.ACMEEmail != "" && cfg.ACMEEmail != "admin@example.com"
+	acmeConfig := proxy.ACMEConfig{
+		Email:    cfg.ACMEEmail,
+		Staging:  cfg.ACMEStaging,
+		CacheDir: cfg.ACMECacheDir,
+		Enabled:  acmeEnabled,
+	}
+
+	if acmeEnabled {
+		slog.Info("ACME/TLS enabled",
+			"email", cfg.ACMEEmail,
+			"staging", cfg.ACMEStaging,
+			"cache_dir", cfg.ACMECacheDir,
+		)
+	} else {
+		slog.Info("ACME/TLS disabled, HTTP-only mode")
+	}
+
+	httpProxy := proxy.NewHTTPProxy(httpAddr, httpsAddr, acmeConfig)
 
 	// Start HTTP proxy in background
 	go func() {
