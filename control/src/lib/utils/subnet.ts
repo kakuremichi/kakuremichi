@@ -17,8 +17,10 @@ export async function getNextSubnet(): Promise<string> {
   // Extract subnet numbers (10.X.0.0/24 -> X)
   const usedNumbers = existingAgents
     .map((agent) => {
-      const match = agent.subnet.match(/^10\.(\d+)\.0\.0\/24$/);
-      return match ? parseInt(match[1], 10) : 0;
+      // subnet is NOT NULL in the schema, safe to assert
+      const subnet = agent.subnet as string;
+      const match = subnet.match(/^10\.(\d+)\.0\.0\/24$/);
+      return match && match[1] ? parseInt(match[1], 10) : 0;
     })
     .filter((num) => num > 0);
 

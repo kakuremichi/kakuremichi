@@ -10,7 +10,16 @@
       "Bash(whereis go:*)",
       "Bash(command -v:*)",
       "Bash(chmod:*)",
-      "WebFetch(domain:mintcdn.com)"
+      "WebFetch(domain:mintcdn.com)",
+      "Bash(npm install)",
+      "Bash(npx tsc:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)",
+      "Bash(./gateway.exe:*)",
+      "Bash(./agent.exe:*)",
+      "Bash(npm run db:generate:*)",
+      "Bash(npm run db:migrate:*)",
+      "Bash(timeout 10 npm run dev:*)"
     ],
     "deny": [],
     "ask": []

@@ -34,6 +34,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Prevent "declared and not used" error
+	_ = ctx
+
 	// TODO: Initialize WireGuard + netstack
 	// wg, err := wireguard.NewDevice(cfg)
 	// if err != nil {

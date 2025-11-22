@@ -36,6 +36,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Prevent "declared and not used" error
+	_ = ctx
+
 	// TODO: Initialize WireGuard interface
 	// wg, err := wireguard.NewInterface(cfg)
 	// if err != nil {
