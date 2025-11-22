@@ -101,8 +101,12 @@ func main() {
 		}
 	}()
 
-	// Initialize WebSocket client (Control connection)
-	wsClient := ws.NewClient(cfg)
+	// Initialize WebSocket client (Control connection) with public key
+	var publicKey string
+	if wg != nil {
+		publicKey = wg.PublicKey()
+	}
+	wsClient := ws.NewClient(cfg, publicKey)
 	wsClient.SetConfigUpdateCallback(func(config ws.GatewayConfig) {
 		slog.Info("Received configuration update",
 			"agents_count", len(config.Agents),

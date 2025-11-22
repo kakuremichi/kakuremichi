@@ -99,12 +99,13 @@ export class ControlWebSocketServer {
 
         clientId = gateway[0]!.id;
 
-        // Update last seen
+        // Update last seen and public key
         await db
           .update(gateways)
           .set({
             status: 'online',
             lastSeenAt: new Date(),
+            wireguardPublicKey: message.publicKey || null,
           })
           .where(eq(gateways.id, clientId));
       } else if (message.clientType === 'agent') {

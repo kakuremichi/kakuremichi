@@ -13,10 +13,11 @@ import (
 
 // Client represents a WebSocket client for Gateway
 type Client struct {
-	cfg    *config.Config
-	conn   *websocket.Conn
-	ctx    context.Context
-	cancel context.CancelFunc
+	cfg       *config.Config
+	publicKey string // WireGuard public key
+	conn      *websocket.Conn
+	ctx       context.Context
+	cancel    context.CancelFunc
 
 	// Channels
 	send chan []byte
@@ -27,15 +28,16 @@ type Client struct {
 }
 
 // NewClient creates a new WebSocket client
-func NewClient(cfg *config.Config) *Client {
+func NewClient(cfg *config.Config, publicKey string) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Client{
-		cfg:    cfg,
-		ctx:    ctx,
-		cancel: cancel,
-		send:   make(chan []byte, 256),
-		recv:   make(chan []byte, 256),
+		cfg:       cfg,
+		publicKey: publicKey,
+		ctx:       ctx,
+		cancel:    cancel,
+		send:      make(chan []byte, 256),
+		recv:      make(chan []byte, 256),
 	}
 }
 
@@ -74,7 +76,7 @@ func (c *Client) authenticate() error {
 		},
 		APIKey:     c.cfg.APIKey,
 		ClientType: "gateway",
-		// TODO: Send WireGuard public key if available
+		PublicKey:  c.publicKey,
 	}
 
 	data, err := json.Marshal(authMsg)
