@@ -125,61 +125,85 @@ Pangolinを参考にしながら、独自のトンネル型リバースプロキ
   - 仮想IP: 10.0.0.100/24
   - **ポート開放不要**（アウトバウンド接続のみ）
 
-**WireGuard仮想ネットワーク**:
+**WireGuard仮想ネットワーク（スケーラブル設計）**:
+
+各Agentが独自の/24サブネットを持つことで、Gateway設定がAgent数に依存しない：
+
 ```
-10.0.0.0/24
-  ├─ 10.0.0.1 (Gateway1)
-  ├─ 10.0.0.2 (Gateway2)
-  ├─ 10.0.0.3 (Gateway3)
-  ├─ 10.0.0.100 (Agent A)
-  └─ 10.0.0.101 (Agent B)
+Agent A のサブネット: 10.1.0.0/24
+  ├─ 10.1.0.100 (Agent A)
+  ├─ 10.1.0.1 (Gateway1)
+  ├─ 10.1.0.2 (Gateway2)
+  └─ 10.1.0.3 (Gateway3)
+
+Agent B のサブネット: 10.2.0.0/24
+  ├─ 10.2.0.100 (Agent B)
+  ├─ 10.2.0.1 (Gateway1)
+  ├─ 10.2.0.2 (Gateway2)
+  └─ 10.2.0.3 (Gateway3)
+
+Agent C のサブネット: 10.3.0.0/24
+  ├─ 10.3.0.100 (Agent C)
+  ├─ 10.3.0.1 (Gateway1)
+  ├─ 10.3.0.2 (Gateway2)
+  └─ 10.3.0.3 (Gateway3)
 ```
 
-**Agent側のWireGuard設定例**:
+**Agent側のWireGuard設定例（Agent A）**:
 ```ini
 [Interface]
-PrivateKey = <AgentのPrivateKey>
-Address = 10.0.0.100/24
+PrivateKey = <AgentAのPrivateKey>
+Address = 10.1.0.100/24
 
 [Peer]  # Gateway1
 PublicKey = <Gateway1のPublicKey>
 Endpoint = 1.2.3.4:51820
-AllowedIPs = 10.0.0.1/32  # Gateway1のみ許可
+AllowedIPs = 10.1.0.1/32  # Gateway1のみ許可
 PersistentKeepalive = 25
 
 [Peer]  # Gateway2
 PublicKey = <Gateway2のPublicKey>
 Endpoint = 5.6.7.8:51820
-AllowedIPs = 10.0.0.2/32  # Gateway2のみ許可
+AllowedIPs = 10.1.0.2/32  # Gateway2のみ許可
 PersistentKeepalive = 25
 
 [Peer]  # Gateway3
 PublicKey = <Gateway3のPublicKey>
 Endpoint = 9.10.11.12:51820
-AllowedIPs = 10.0.0.3/32  # Gateway3のみ許可
+AllowedIPs = 10.1.0.3/32  # Gateway3のみ許可
 PersistentKeepalive = 25
 ```
 
-**Gateway側のWireGuard設定例**:
+**Gateway側のWireGuard設定例（Gateway1）**:
 ```ini
 [Interface]
 PrivateKey = <Gateway1のPrivateKey>
-Address = 10.0.0.1/24
+# 複数のサブネットに参加するため、複数のIPアドレスを持つ
+Address = 10.1.0.1/24, 10.2.0.1/24, 10.3.0.1/24
 ListenPort = 51820
 
-[Peer]  # Agent A
+[Peer]  # Agent A（サブネット全体を許可）
 PublicKey = <AgentAのPublicKey>
-AllowedIPs = 10.0.0.100/32  # このAgentのみ許可
+AllowedIPs = 10.1.0.0/24  # Agent Aのサブネット全体
 
-[Peer]  # Agent B
+[Peer]  # Agent B（サブネット全体を許可）
 PublicKey = <AgentBのPublicKey>
-AllowedIPs = 10.0.0.101/32  # このAgentのみ許可
+AllowedIPs = 10.2.0.0/24  # Agent Bのサブネット全体
+
+[Peer]  # Agent C（サブネット全体を許可）
+PublicKey = <AgentCのPublicKey>
+AllowedIPs = 10.3.0.0/24  # Agent Cのサブネット全体
 ```
 
 **セキュリティ**:
 - `AllowedIPs`で通信相手を厳密に制限
-- Agent間の直接通信は不可能
+- Agent間の直接通信は不可能（異なるサブネット）
 - Agent ⇔ Gateway のみ通信可能
+
+**スケーラビリティのメリット**:
+- Gatewayに新しいAgentを追加する際、IPアドレスを1つ追加するだけ
+- Agent数が増えても設定の複雑さは線形増加
+- 最大254個のサブネット（10.1.0.0/24 〜 10.254.0.0/24）までサポート可能
 ```
 
 **DNSラウンドロビン対応**:
@@ -190,16 +214,26 @@ example.com のAレコード:
   - 9.10.11.12 (Gateway3)
 
 外部ユーザー
-  ↓ DNS round robin → どれかのGateway
+  ↓ DNS round robin → どれかのGateway（例: Gateway1）
   ↓ HTTPS:443
-Gateway（どれでもOK、SSL終端）
+Gateway1（SSL終端）
   ↓ WireGuardトンネル経由
-  → 10.0.0.100 (Agent仮想IP)
+  → 10.1.0.100 (Agent A の仮想IP)
   ↓
-Agent
+Agent A
   ↓ ローカルプロキシ
 プライベートアプリ
 ```
+
+**トラフィックフロー例**:
+1. ユーザーが`https://app.example.com`にアクセス
+2. DNSがラウンドロビンで`1.2.3.4`（Gateway1）を返す
+3. Gateway1がHTTPS通信を受信、SSL終端
+4. Gateway1が`10.1.0.100`（Agent A）にトンネル経由でプロキシ
+5. Agent AがローカルのDockerコンテナ（例: `localhost:8080`）にプロキシ
+6. レスポンスが逆順で返る
+
+どのGatewayに接続しても、すべてのGatewayが同じAgent（10.1.0.100）に到達できるため、透過的に動作します。
 
 ### 2. 認証・認可の設計
 
