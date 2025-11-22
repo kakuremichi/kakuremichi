@@ -217,8 +217,9 @@ func ensureGatewayIPs(iface string, agents []struct {
 		if err != nil || ipnet == nil {
 			continue
 		}
+		subnetStr := ipnet.String()
 		// Compute gateway IP = network with last octet 1 (for /24)
-		ip := ipnet.IP.To4()
+		ip := append(net.IP(nil), ipnet.IP.To4()...) // copy to avoid mutating ipnet
 		if ip == nil {
 			continue
 		}
@@ -240,13 +241,13 @@ func ensureGatewayIPs(iface string, agents []struct {
 		}
 
 		// Ensure route to agent subnet via wg interface
-		routeCmd := exec.Command("ip", "route", "add", ipnet.String(), "dev", iface)
+		routeCmd := exec.Command("ip", "route", "add", subnetStr, "dev", iface)
 		if out, err := routeCmd.CombinedOutput(); err != nil {
 			if !strings.Contains(string(out), "File exists") && !strings.Contains(err.Error(), "File exists") {
-				slog.Warn("Failed to add route for agent subnet", "subnet", ipnet.String(), "iface", iface, "error", err, "out", string(out))
+				slog.Warn("Failed to add route for agent subnet", "subnet", subnetStr, "iface", iface, "error", err, "out", string(out))
 			}
 		} else {
-			slog.Info("Added route for agent subnet", "subnet", ipnet.String(), "iface", iface)
+			slog.Info("Added route for agent subnet", "subnet", subnetStr, "iface", iface)
 		}
 	}
 }
