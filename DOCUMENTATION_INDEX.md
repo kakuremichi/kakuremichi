@@ -21,10 +21,14 @@
 
 | モジュール | コンポーネント | 説明 | パス |
 |-----------|--------------|------|------|
+| **データベース** | Control | Drizzle ORM、スキーマ、マイグレーション | `modules/control-database.md` |
 | **WebSocketサーバー** | Control | Agent/Gatewayとの通信管理 | `modules/control-websocket-server.md` |
 | **WireGuard管理** | Gateway | WireGuardインターフェース、Peer管理 | `modules/gateway-wireguard.md` |
 | **HTTPプロキシ** | Gateway | HTTPS受信、SSL終端、ルーティング | `modules/gateway-http-proxy.md` |
+| **WireGuard + netstack** | Agent | ユーザースペースWireGuard、複数Gateway接続 | `modules/agent-wireguard.md` |
 | **ローカルプロキシ** | Agent | WireGuard → ローカルアプリへのプロキシ | `modules/agent-local-proxy.md` |
+| **WebSocketクライアント** | Gateway/Agent | Control接続、設定受信、ハートビート | `modules/websocket-client.md` |
+| **インストールスクリプト** | 共通 | agent.sh、gateway.shの実装仕様 | `modules/install-scripts.md` |
 
 ---
 
@@ -76,33 +80,42 @@ kakuremichi/
 
 ## 次のステップ
 
-### 1. 追加で必要なモジュール仕様
-
-以下のモジュール仕様を作成すると、実装がさらにスムーズになります：
+### 1. 作成済みモジュール仕様 ✓
 
 **Control**:
-- [ ] `control-database.md` - Drizzle ORM、スキーマ、マイグレーション
-- [ ] `control-api-routes.md` - REST API実装（Agent/Gateway/Tunnel管理）
-- [ ] `control-wireguard-config.md` - WireGuard設定生成ロジック
-- [ ] `control-frontend.md` - Next.js UI実装（ページ、コンポーネント）
+- [x] `control-database.md` - Drizzle ORM、スキーマ、マイグレーション
+- [x] `control-websocket-server.md` - WebSocketサーバー実装
 
 **Gateway**:
-- [ ] `gateway-websocket-client.md` - Control接続、メッセージハンドリング
-- [ ] `gateway-ssl.md` - Let's Encrypt証明書管理
+- [x] `gateway-wireguard.md` - WireGuard管理
+- [x] `gateway-http-proxy.md` - HTTPプロキシ、SSL終端
+- [x] `websocket-client.md` - Control接続、メッセージハンドリング
 
 **Agent**:
-- [ ] `agent-wireguard.md` - WireGuard + netstack実装
-- [ ] `agent-websocket-client.md` - Control接続、メッセージハンドリング
-- [ ] `agent-docker.md` - Docker統合（コンテナ検出）
+- [x] `agent-wireguard.md` - WireGuard + netstack実装
+- [x] `agent-local-proxy.md` - ローカルプロキシ
+- [x] `websocket-client.md` - Control接続、メッセージハンドリング
 
 **共通**:
-- [ ] `install-scripts.md` - agent.sh、gateway.shの実装仕様
+- [x] `install-scripts.md` - agent.sh、gateway.shの実装仕様
 
-### 2. プロジェクト初期化
+### 2. オプションで追加可能なモジュール仕様
+
+実装を進めながら、必要に応じて以下を作成：
+
+**Control**:
+- [ ] `control-api-routes.md` - REST API実装の詳細（各エンドポイント）
+- [ ] `control-wireguard-config.md` - WireGuard鍵ペア生成、設定生成ロジック
+- [ ] `control-frontend.md` - Next.js UI実装（ページ、コンポーネント詳細）
+
+**Agent**:
+- [ ] `agent-docker.md` - Docker統合（コンテナ自動検出）詳細
+
+### 3. プロジェクト初期化
 
 ディレクトリ作成、package.json、go.modのセットアップ
 
-### 3. 実装開始
+### 4. 実装開始
 
 モジュール仕様に基づいて実装
 
