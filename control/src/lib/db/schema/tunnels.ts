@@ -1,0 +1,22 @@
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { agents } from './agents';
+
+export const tunnels = sqliteTable('tunnels', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  domain: text('domain', { length: 255 }).notNull().unique(),
+  agentId: text('agent_id')
+    .notNull()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  target: text('target', { length: 255 }).notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  description: text('description'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type Tunnel = typeof tunnels.$inferSelect;
+export type NewTunnel = typeof tunnels.$inferInsert;
