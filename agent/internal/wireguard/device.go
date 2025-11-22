@@ -31,15 +31,27 @@ func NewDevice(config *DeviceConfig) (*Device, error) {
 	d.privateKey = config.PrivateKey
 	d.publicKey = privateKey.PublicKey().String()
 
-	// Parse virtual IP and subnet
-	addr, err := netip.ParsePrefix(config.Subnet)
+	// Parse virtual IP (this is the address we bind HTTP to)
+	virtualIP, err := netip.ParseAddr(config.VirtualIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid virtual IP: %w", err)
+	}
+
+	// Parse subnet (used for allowed IPs calculation)
+	subnet, err := netip.ParsePrefix(config.Subnet)
 	if err != nil {
 		return nil, fmt.Errorf("invalid subnet: %w", err)
 	}
 
+	slog.Info("Parsed WireGuard configuration",
+		"public_key", d.publicKey,
+		"virtual_ip", virtualIP,
+		"subnet", subnet,
+	)
+
 	// Create netstack TUN device
 	tun, tnet, err := netstack.CreateNetTUN(
-		[]netip.Addr{addr.Addr()},
+		[]netip.Addr{virtualIP},
 		[]netip.Addr{}, // DNS servers (empty for now)
 		1420,           // MTU
 	)
@@ -87,6 +99,12 @@ func (d *Device) configureDevice() error {
 	// Build IPC configuration string with hex-encoded key
 	config := fmt.Sprintf("private_key=%x\n", privateKey[:])
 
+	// Parse subnet (used for peer allowed IPs)
+	subnet, err := netip.ParsePrefix(d.config.Subnet)
+	if err != nil {
+		return fmt.Errorf("invalid subnet: %w", err)
+	}
+
 	// Add peers (Gateways)
 	for _, gw := range d.config.Gateways {
 		// Parse the base64 public key and convert to hex for IPC
@@ -102,11 +120,6 @@ func (d *Device) configureDevice() error {
 
 		// Calculate AllowedIP based on subnet
 		// For subnet 10.1.0.0/24, Gateway IP would be 10.1.0.X/32
-		subnet, err := netip.ParsePrefix(d.config.Subnet)
-		if err != nil {
-			return fmt.Errorf("invalid subnet: %w", err)
-		}
-
 		// Extract the third octet from subnet (e.g., "10.1.0.0/24" -> 1)
 		subnetIP := subnet.Addr().As4()
 		gatewayIP := fmt.Sprintf("10.%d.0.%d/32", subnetIP[1], getGatewayIndex(gw))
@@ -154,6 +167,11 @@ func (d *Device) Close() error {
 	}
 
 	return nil
+}
+
+// Net returns the underlying netstack network for user-space networking
+func (d *Device) Net() *netstack.Net {
+	return d.net
 }
 
 // PublicKey returns the device's public key

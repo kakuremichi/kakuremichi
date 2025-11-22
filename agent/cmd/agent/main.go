@@ -114,7 +114,7 @@ func main() {
 		if localProxy == nil && config.Agent.VirtualIP != "" && wgDevice != nil {
 			// First time initialization - wait a bit for WireGuard to be ready
 			proxyAddr := config.Agent.VirtualIP + ":80"
-			localProxy = proxy.NewLocalProxy(proxyAddr)
+			localProxy = proxy.NewLocalProxy(wgDevice.Net(), proxyAddr)
 
 			// Start proxy in background
 			go func() {

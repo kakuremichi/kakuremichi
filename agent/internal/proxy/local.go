@@ -2,18 +2,24 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"sync"
+
+	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
 // NewLocalProxy creates a new local proxy server
-func NewLocalProxy(addr string) *LocalProxy {
+func NewLocalProxy(net *netstack.Net, addr string) *LocalProxy {
 	return &LocalProxy{
 		tunnels: make(map[string]*TunnelMapping),
 		addr:    addr,
+		net:     net,
 	}
 }
 
@@ -38,22 +44,50 @@ func (p *LocalProxy) UpdateTunnels(tunnels []TunnelMapping) {
 
 // Start starts the local proxy server
 func (p *LocalProxy) Start(ctx context.Context) error {
-	slog.Info("Starting local proxy", "addr", p.addr)
+	slog.Info("Starting local proxy", "addr", p.addr, "netstack", p.net != nil)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", p.handleRequest)
 
 	server := &http.Server{
-		Addr:    p.addr,
 		Handler: mux,
 	}
 
 	// Start server in goroutine
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("Local proxy server error", "error", err)
+	if p.net != nil {
+		host, portStr, err := net.SplitHostPort(p.addr)
+		if err != nil {
+			return fmt.Errorf("invalid listen addr %s: %w", p.addr, err)
 		}
-	}()
+
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return fmt.Errorf("invalid listen port %s: %w", portStr, err)
+		}
+
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return fmt.Errorf("invalid listen ip %s", host)
+		}
+
+		listener, err := p.net.ListenTCP(&net.TCPAddr{IP: ip, Port: port})
+		if err != nil {
+			return fmt.Errorf("failed to listen on netstack %s: %w", p.addr, err)
+		}
+
+		go func() {
+			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+				slog.Error("Local proxy server error", "error", err)
+			}
+		}()
+	} else {
+		server.Addr = p.addr
+		go func() {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("Local proxy server error", "error", err)
+			}
+		}()
+	}
 
 	// Wait for context cancellation
 	<-ctx.Done()

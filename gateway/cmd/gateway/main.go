@@ -6,8 +6,10 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
+	"net"
 
 	"github.com/yourorg/kakuremichi/gateway/internal/config"
 	"github.com/yourorg/kakuremichi/gateway/internal/proxy"
@@ -158,6 +160,11 @@ func main() {
 		}
 
 		httpProxy.UpdateRoutes(routes)
+
+		// Ensure WireGuard interface has IP addresses for each agent subnet (for routing)
+		if wg != nil {
+			ensureGatewayIPs(cfg.WireguardInterface, config.Agents)
+		}
 	})
 
 	// Connect to Control server
@@ -189,4 +196,49 @@ func main() {
 	}
 
 	fmt.Println("Gateway stopped")
+}
+
+// ensureGatewayIPs adds a /24 IP (x.y.0.1) for each agent subnet to the WireGuard interface.
+// This lets the kernel select a proper source address when proxying to agent virtual IPs.
+func ensureGatewayIPs(iface string, agents []struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	WireguardPublicKey string `json:"wireguardPublicKey"`
+	Subnet             string `json:"subnet"`
+	VirtualIP          string `json:"virtualIp"`
+}) {
+	seen := make(map[string]struct{})
+	for _, ag := range agents {
+		_, ipnet, err := net.ParseCIDR(ag.Subnet)
+		if err != nil || ipnet == nil {
+			continue
+		}
+		// Compute gateway IP = network with last octet 1 (for /24)
+		ip := ipnet.IP.To4()
+		if ip == nil {
+			continue
+		}
+		ip[3] = 1
+		addr := fmt.Sprintf("%s/%d", ip.String(), maskToPrefix(ipnet.Mask))
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+
+		cmd := exec.Command("ip", "address", "add", addr, "dev", iface)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			// Ignore if already exists
+			if !strings.Contains(string(out), "File exists") && !strings.Contains(err.Error(), "File exists") {
+				slog.Warn("Failed to add IP to WireGuard interface", "addr", addr, "iface", iface, "error", err, "out", string(out))
+			}
+		} else {
+			slog.Info("Added IP to WireGuard interface", "addr", addr, "iface", iface)
+		}
+	}
+}
+
+// maskToPrefix converts a net.IPMask to CIDR prefix length.
+func maskToPrefix(mask net.IPMask) int {
+	ones, _ := mask.Size()
+	return ones
 }

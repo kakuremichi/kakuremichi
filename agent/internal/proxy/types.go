@@ -1,5 +1,7 @@
 package proxy
 
+import "golang.zx2c4.com/wireguard/tun/netstack"
+
 // TunnelMapping represents a tunnel configuration
 type TunnelMapping struct {
 	ID      string
@@ -12,4 +14,5 @@ type TunnelMapping struct {
 type LocalProxy struct {
 	tunnels map[string]*TunnelMapping // domain -> tunnel
 	addr    string                    // Listen address (e.g., "10.1.0.100:80")
+	net     *netstack.Net             // netstack network; nil => OS stack
 }
