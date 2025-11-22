@@ -461,9 +461,26 @@ func TestRouter_ServeHTTP(t *testing.T) {
 7. **証明書発行**: Let's Encryptが証明書+秘密鍵を発行
 8. **autocertがキャッシュに保存**: `/var/cache/autocert/app.example.com`
 
-### 複数Gateway時の課題と解決策
+### 複数Gateway時の設計（ゼロ知識アーキテクチャ）
 
-#### 問題点
+#### 基本方針
+
+**各Gatewayが独立してautocertで証明書を取得・管理**
+
+```
+重要原則:
+✅ 各Gatewayが自身でautocertを使用してLet's Encrypt証明書を取得
+✅ TLS秘密鍵はGatewayローカルに保存（Control Planeは一切関知しない）
+✅ 複数GatewayはDNS Round Robinで負荷分散
+✅ 各Gatewayが独立してHTTP-01チャレンジに応答
+```
+
+**セキュリティ上の利点**:
+- TLS秘密鍵がControl Planeを経由しない
+- 各Gatewayが独立して証明書管理
+- Control Plane侵害時もTLS通信は保護される
+
+#### DNS Round Robin環境での動作
 
 DNS Round Robin環境で複数Gatewayが存在する場合：
 
@@ -472,107 +489,94 @@ app.example.com → 1.2.3.4 (Gateway1)
                  → 5.6.7.8 (Gateway2)
 ```
 
-- Gateway1が証明書取得を開始
-- Let's EncryptがHTTP-01チャレンジの検証リクエストを送信
-- **DNS Round RobinでGateway2に振り分けられる可能性**
-- Gateway2はチャレンジトークンを持っていない → 検証失敗
+**証明書取得フロー**:
 
-#### 解決策1: 証明書の事前取得（推奨、MVP採用）
+1. **Gateway1が証明書取得を開始**:
+   - `app.example.com`の証明書をautocertで取得開始
+   - Let's EncryptがHTTP-01チャレンジの検証リクエストを送信
 
-**Control側でACME取得を行い、Gatewayに配信する方式**
+2. **Let's EncryptのDNS解決**:
+   - DNS Round RobinでGateway1またはGateway2のいずれかに振り分け
 
-```typescript
-// control/src/lib/acme/manager.ts
+3. **シナリオA: Gateway1に振り分け（証明書取得成功）**:
+   - Gateway1がチャレンジに応答 → 検証成功 → 証明書取得
 
-import { autocert } from 'golang.org/x/crypto/acme/autocert';
+4. **シナリオB: Gateway2に振り分け（初回は失敗、リトライで成功）**:
+   - Gateway2はチャレンジトークンを持っていない → 検証失敗
+   - autocertが自動的にリトライ
+   - 次のDNS解決でGateway1に振り分けられれば成功
 
-class ACMEManager {
-  async obtainCertificate(domain: string): Promise<{ cert: string; key: string }> {
-    // Controlサーバーで証明書取得
-    // HTTP-01チャレンジはControlが応答
-    const manager = new autocert.Manager({
-      Prompt: autocert.AcceptTOS,
-      HostPolicy: autocert.HostWhitelist(domain),
-      Cache: autocert.DirCache('/var/cache/acme'),
-    });
+5. **Gateway2の証明書取得**:
+   - Gateway2も同様に`app.example.com`の証明書を独立して取得
+   - autocertが自動的にリトライして証明書取得
 
-    const cert = await manager.GetCertificate(domain);
+**結果**:
+- 各Gatewayが独立して同じドメインの証明書を保持
+- DNS Round Robin環境でも最終的に両Gatewayで証明書取得可能
+- Let's Encryptはドメイン単位でRate Limit（週50回）があるが、通常の運用では問題なし
 
-    // DBに保存
-    await db.insert(certificates).values({
-      domain,
-      certificate: cert.Certificate,
-      privateKey: cert.PrivateKey,
-      expiresAt: cert.Leaf.NotAfter,
-    });
+#### 代替案: DNS-01チャレンジ（推奨、Phase 2）
 
-    // 全Gatewayに配信（WebSocket経由）
-    await wsServer.broadcastCertificate({
-      domain,
-      certificate: cert.Certificate,
-      privateKey: cert.PrivateKey,
-    });
+HTTP-01チャレンジの代わりに**DNS-01チャレンジ**を使用することで、DNS Round Robinの問題を完全に回避できます。
 
-    return { cert: cert.Certificate, key: cert.PrivateKey };
-  }
-}
-```
+**DNS-01チャレンジの利点**:
+- DNSプロバイダーAPI（Cloudflare、Route53など）を使用してTXTレコードを設定
+- どのGatewayからでも証明書取得可能
+- ワイルドカード証明書（`*.example.com`）の取得も可能
 
-**メリット**:
-- 複数Gateway間で証明書の不整合が発生しない
-- Let's EncryptのRate Limit回避（1つのドメインで1回のみ取得）
-
-**デメリット**:
-- Controlサーバーに証明書取得用のHTTP 80番ポート公開が必要
-- または別の検証方法（DNS-01）が必要
-
-#### 解決策2: 証明書キャッシュの共有（Phase 2）
-
-**共有ストレージでautocertキャッシュを共有**
+**実装例（Cloudflare DNS-01）**:
 
 ```go
-// gateway/internal/proxy/http.go
+// gateway/internal/ssl/dns01.go
 
 import (
-    "golang.org/x/crypto/acme/autocert"
-    "cloud.google.com/go/storage"
+    "github.com/libdns/cloudflare"
+    "github.com/mholt/acmez/acme"
 )
 
-// GCS（Google Cloud Storage）をキャッシュとして使用
-type GCSCache struct {
-    bucket *storage.BucketHandle
+type CloudflareDNSProvider struct {
+    provider *cloudflare.Provider
 }
 
-func (c *GCSCache) Get(ctx context.Context, key string) ([]byte, error) {
-    // GCSからキャッシュ取得
+func (p *CloudflareDNSProvider) Present(domain, token, keyAuth string) error {
+    // Cloudflare APIでTXTレコード作成
+    return p.provider.AppendRecords(ctx, domain, []libdns.Record{
+        {
+            Type:  "TXT",
+            Name:  "_acme-challenge",
+            Value: keyAuth,
+        },
+    })
 }
 
-func (c *GCSCache) Put(ctx context.Context, key string, data []byte) error {
-    // GCSにキャッシュ保存
-}
-
-func (c *GCSCache) Delete(ctx context.Context, key string) error {
-    // GCSからキャッシュ削除
+func (p *CloudflareDNSProvider) CleanUp(domain, token, keyAuth string) error {
+    // TXTレコード削除
+    return p.provider.DeleteRecords(ctx, domain, records)
 }
 
 // autocertで使用
-m := &autocert.Manager{
-    Cache: &GCSCache{bucket: gcsBucket},
-    // ...
+certManager := &autocert.Manager{
+    Prompt:     autocert.AcceptTOS,
+    Cache:      autocert.DirCache("/var/cache/autocert"),
+    HostPolicy: autocert.HostWhitelist("app.example.com"),
+    // DNS-01チャレンジを使用
+    DNS01Provider: &CloudflareDNSProvider{
+        provider: cloudflare.New(apiToken),
+    },
 }
 ```
 
 **メリット**:
-- 複数Gateway間で証明書を自動共有
-- どのGatewayでも証明書取得・検証可能
+- DNS Round Robin環境で確実に証明書取得可能
+- ワイルドカード証明書対応
 
 **デメリット**:
-- 外部ストレージ（GCS、S3、Azure Blob）が必要
-- MVP範囲外
+- DNSプロバイダーAPIキーが必要
+- MVP範囲外（Phase 2で実装）
 
-### MVP実装方針（解決策1採用）
+### MVP実装方針（Gatewayが独立して証明書取得）
 
-#### Tunnel作成時の証明書自動取得フロー
+#### Tunnel作成時の動作フロー
 
 1. **ユーザーがWeb UIでTunnel作成**:
    - ドメイン: `app.example.com`
@@ -589,70 +593,91 @@ m := &autocert.Manager{
    }
    ```
 
-3. **証明書の確認と取得**:
-   ```typescript
-   // Tunnel作成時に証明書を確認
-   const existingCert = await db.query.certificates.findFirst({
-     where: eq(certificates.domain, domain),
-   });
+3. **Controlがトンネル情報を全Gatewayに配信**:
+   - WebSocket経由で`tunnel_create`メッセージを全Gatewayに送信
+   - メッセージには**ドメイン名とルーティング情報のみ**（証明書は含まない）
 
-   if (!existingCert) {
-     // 証明書がない場合は取得
-     const { cert, key } = await acmeManager.obtainCertificate(domain);
-   }
-   ```
+4. **各Gatewayが証明書を自動取得**:
+   - `tunnel_create`メッセージを受信したら、`router.AddTunnel()`を呼び出し
+   - `updateHostPolicy()`が呼ばれ、autocertのHostPolicyにドメインを追加
+   - 次回そのドメインへのHTTPSリクエストが来た際、autocertが自動的に証明書取得
+   - 証明書はGatewayのローカルキャッシュに保存（`/var/cache/autocert/`）
 
-4. **Gatewayに証明書配信**:
-   - WebSocket経由で全Gatewayに`certificate_create`メッセージ送信
-   - Gateway側でメモリキャッシュに保存
+**重要**: Control Planeは証明書の取得・保存・配布を一切行わない
 
 ### 証明書の自動更新
 
 **Let's Encrypt証明書の有効期限**: 90日
 
-**更新タイミング**: 有効期限の30日前（残り60日）
+**autocertによる自動更新**:
 
-```typescript
-// control/src/lib/acme/renewal.ts
+```go
+// gateway/internal/ssl/autocert.go
 
-import cron from 'node-cron';
+// autocertは自動的に証明書を更新する
+// - 有効期限の30日前から更新を試みる
+// - TLS Handshake時に期限をチェックし、必要に応じて更新
+// - 更新された証明書は自動的にキャッシュに保存
 
-// 毎日0時に証明書の有効期限をチェック
-cron.schedule('0 0 * * *', async () => {
-  const certificates = await db.query.certificates.findMany();
+func NewCertManager(cacheDir string, email string, logger *slog.Logger) *autocert.Manager {
+    manager := &autocert.Manager{
+        Prompt:      autocert.AcceptTOS,
+        Cache:       autocert.DirCache(cacheDir),
+        Email:       email,
+        HostPolicy:  autocert.HostWhitelist(),  // 初期は空、Routerが更新
 
-  for (const cert of certificates) {
-    const daysUntilExpiry = Math.floor(
-      (cert.expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-    );
-
-    if (daysUntilExpiry <= 30) {
-      logger.info('Renewing certificate', { domain: cert.domain, daysUntilExpiry });
-
-      try {
-        const { cert: newCert, key: newKey } = await acmeManager.obtainCertificate(cert.domain);
-
-        // DBを更新
-        await db.update(certificates)
-          .set({ certificate: newCert, privateKey: newKey, expiresAt: newExpiresAt })
-          .where(eq(certificates.domain, cert.domain));
-
-        // Gatewayに配信
-        await wsServer.broadcastCertificate({
-          domain: cert.domain,
-          certificate: newCert,
-          privateKey: newKey,
-        });
-
-        logger.info('Certificate renewed', { domain: cert.domain });
-      } catch (error) {
-        logger.error('Failed to renew certificate', { domain: cert.domain, error });
-        // アラート送信（Phase 2）
-      }
+        // RenewBefore: 有効期限の30日前から更新開始（デフォルト）
+        // autocertが自動的に処理するため、明示的な指定は不要
     }
-  }
-});
+
+    logger.Info("Certificate manager created",
+        "cacheDir", cacheDir,
+        "email", email,
+    )
+
+    return manager
+}
 ```
+
+**自動更新の仕組み**:
+
+1. **TLS Handshake時の証明書チェック**:
+   - クライアントがHTTPS接続すると、autocertがキャッシュから証明書を取得
+   - 証明書の有効期限をチェック
+
+2. **更新が必要な場合**:
+   - 有効期限まで30日を切っている場合、バックグラウンドで更新を開始
+   - Let's Encryptに新しい証明書をリクエスト
+   - HTTP-01チャレンジを実行
+
+3. **新しい証明書の保存**:
+   - 取得した証明書をキャッシュに保存
+   - 次回のTLS Handshakeから新しい証明書を使用
+
+4. **ゼロダウンタイム**:
+   - 更新中も古い証明書で通信継続
+   - 更新完了後、自動的に新しい証明書に切り替わる
+
+**監視とアラート（Phase 2）**:
+
+```go
+// 証明書の有効期限を監視するヘルスチェック
+func (s *Server) CheckCertificateHealth() error {
+    for domain := range s.router.tunnels {
+        cert, err := s.certManager.Cache.Get(context.Background(), domain)
+        if err != nil {
+            s.logger.Warn("Certificate not found", "domain", domain)
+            continue
+        }
+
+        // 証明書の有効期限をチェック
+        // アラート送信（Slack、メールなど）
+    }
+    return nil
+}
+```
+
+**重要**: Control Planeは証明書の更新に一切関与しない。各Gatewayが独立して自動更新を行う。
 
 ### DNSの設定要件
 
@@ -663,31 +688,31 @@ app.example.com.  IN  A  1.2.3.4  # Gateway1
 app.example.com.  IN  A  5.6.7.8  # Gateway2
 ```
 
-**注意点**:
-- DNS Round Robin環境でLet's Encrypt検証が失敗しないよう、すべてのGateway IPでHTTP-01チャレンジに応答できる必要がある
-- MVP実装（解決策1）ではControlサーバーが証明書を取得するため、**ControlサーバーのIPアドレスをDNSに登録**する必要がある
+**重要事項**:
+- **Gateway IPアドレスのみをDNSに登録**（Control PlaneのIPは不要）
+- 各GatewayがHTTP-01チャレンジに独立して応答
+- DNS Round Robin環境でも、autocertのリトライ機能により最終的に証明書取得成功
 
-**MVP代替案**: DNS-01チャレンジ使用
+**証明書取得の流れ**:
 
-- HTTP-01の代わりにDNS-01チャレンジを使用
+1. **クライアントが`https://app.example.com`にアクセス**
+2. **DNS解決**: Gateway1またはGateway2のいずれかにランダム振り分け
+3. **Gateway1で証明書取得開始**（キャッシュにない場合）
+4. **Let's EncryptがHTTP-01チャレンジを送信**: `http://app.example.com/.well-known/acme-challenge/...`
+5. **DNS解決**: Gateway1またはGateway2に振り分け
+6. **Gateway1に振り分けられた場合**: チャレンジ成功 → 証明書取得
+7. **Gateway2に振り分けられた場合**: チャレンジ失敗 → autocertがリトライ → 最終的に成功
+
+**DNS TTL推奨値**:
+- TTL: 60秒以下（DNS Round Robinの振り分けを頻繁に変更するため）
+
+**Phase 2: DNS-01チャレンジへの移行**:
+
+DNS-01チャレンジを使用することで、より確実に証明書取得が可能：
+
 - DNS TXTレコードで検証
-- Cloudflare API、Route53 APIなどと連携
-
-```typescript
-// DNS-01チャレンジ例（Cloudflare使用）
-import Cloudflare from 'cloudflare';
-
-const cf = new Cloudflare({ apiToken: process.env.CLOUDFLARE_API_TOKEN });
-
-async function createDNSTXTRecord(domain: string, value: string) {
-  await cf.dns.records.create({
-    zone_id: zoneId,
-    type: 'TXT',
-    name: `_acme-challenge.${domain}`,
-    content: value,
-  });
-}
-```
+- DNSプロバイダーAPI（Cloudflare、Route53など）と連携
+- ワイルドカード証明書（`*.example.com`）の取得も可能
 
 ---
 

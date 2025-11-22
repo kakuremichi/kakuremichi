@@ -58,9 +58,8 @@ export type AgentMessage =
 
 // Gateway → Control メッセージ
 export type GatewayMessage =
-  | { type: 'auth'; data: { apiKey: string; publicIp: string } }
-  | { type: 'heartbeat'; data: { timestamp: number } }
-  | { type: 'certificate_obtained'; data: { domain: string; certificate: string; privateKey: string; expiresAt: string } };
+  | { type: 'auth'; data: { apiKey: string; publicIp: string; wireguardPublicKey: string } }
+  | { type: 'heartbeat'; data: { timestamp: number } };
 
 // Control → Agent/Gateway メッセージ
 export type ControlMessage =
@@ -121,8 +120,9 @@ export class WSServer {
   private async sendConfig(client: Client): Promise<void> {
     // clientのtypeに応じて設定を取得
     // Agent: gateways, tunnels
-    // Gateway: agents, tunnels, certificates
+    // Gateway: agents, tunnels
     // configメッセージとして送信
+    // 注: TLS証明書はGatewayが独立して管理するため配信不要
   }
 
   public async broadcastTunnelCreate(tunnel: any): Promise<void> {
@@ -314,7 +314,6 @@ private async sendConfig(client: Client): Promise<void> {
 
     const agentList = await db.query.agents.findMany();
     const tunnelList = await db.query.tunnels.findMany();
-    const certList = await db.query.certificates.findMany();
 
     this.send(client, {
       type: 'config',
@@ -322,7 +321,7 @@ private async sendConfig(client: Client): Promise<void> {
         gateway: {
           id: gateway.id,
           name: gateway.name,
-          wireguardPrivateKey: gateway.wireguardPrivateKey,
+          wireguardPublicKey: gateway.wireguardPublicKey,
         },
         agents: agentList.map(a => ({
           id: a.id,
@@ -341,12 +340,7 @@ private async sendConfig(client: Client): Promise<void> {
             enabled: t.enabled,
           };
         }),
-        certificates: certList.map(c => ({
-          domain: c.domain,
-          certificate: c.certificate,
-          privateKey: c.privateKey,
-          expiresAt: c.expiresAt,
-        })),
+        // 注: TLS証明書はGatewayが独立して管理するため配信不要
       },
     });
   }

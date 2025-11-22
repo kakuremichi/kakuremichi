@@ -17,7 +17,8 @@ Controlサーバーで管理するデータベーススキーマを定義しま�
 1. **Agent** - エッジクライアント（オリジン側）
 2. **Gateway** - 入口ノード
 3. **Tunnel** - トンネル設定（ドメイン → Agent のマッピング）
-4. **Certificate** - SSL/TLS証明書（Let's Encrypt）
+
+**注**: TLS証明書はGatewayが独立して管理するため、ControlのDBには保存しない
 
 ### Phase 2以降で追加予定
 
@@ -38,8 +39,7 @@ Controlサーバーで管理するデータベーススキーマを定義しま�
 | id | UUID | ✓ | プライマリキー |
 | name | String | ✓ | Agent名（ユーザーが設定、例: "home-server"） |
 | api_key | String | ✓ | 認証用APIキー（Control接続時に使用） |
-| wireguard_public_key | String | ✓ | WireGuard公開鍵 |
-| wireguard_private_key | String | ✓ | WireGuard秘密鍵（**MVP: 平文保存、Phase 2: 暗号化**） |
+| wireguard_public_key | String | ✓ | WireGuard公開鍵（**Agentがローカルで生成した秘密鍵の公開鍵**） |
 | virtual_ip | String | ✓ | WireGuard仮想IP（例: "10.1.0.100"） |
 | subnet | String | ✓ | Agent専用サブネット（例: "10.1.0.0/24"） |
 | status | Enum | ✓ | ステータス（online, offline, error） |
@@ -72,8 +72,7 @@ Controlサーバーで管理するデータベーススキーマを定義しま�
 | name | String | ✓ | Gateway名（例: "gateway-tokyo"） |
 | api_key | String | ✓ | 認証用APIキー（Control接続時に使用） |
 | public_ip | String | ✓ | グローバルIP（例: "1.2.3.4"） |
-| wireguard_public_key | String | ✓ | WireGuard公開鍵 |
-| wireguard_private_key | String | ✓ | WireGuard秘密鍵（**MVP: 平文保存、Phase 2: 暗号化**） |
+| wireguard_public_key | String | ✓ | WireGuard公開鍵（**Gatewayがローカルで生成した秘密鍵の公開鍵**） |
 | region | String | - | リージョン（例: "tokyo", "singapore"） |
 | status | Enum | ✓ | ステータス（online, offline, error） |
 | last_seen_at | DateTime | - | 最終接続日時 |
@@ -123,34 +122,6 @@ Controlサーバーで管理するデータベーススキーマを定義しま�
 
 ---
 
-### 4. Certificate
-
-SSL/TLS証明書（Let's Encrypt）
-
-| カラム名 | 型 | 必須 | 説明 |
-|---------|-----|------|------|
-| id | UUID | ✓ | プライマリキー |
-| domain | String | ✓ | ドメイン名（例: "app.example.com"） |
-| certificate | Text | ✓ | 証明書（PEM形式） |
-| private_key | Text | ✓ | 秘密鍵（PEM形式、暗号化推奨） |
-| expires_at | DateTime | ✓ | 有効期限 |
-| auto_renew | Boolean | ✓ | 自動更新（デフォルト: true） |
-| last_renewed_at | DateTime | - | 最終更新日時 |
-| created_at | DateTime | ✓ | 作成日時 |
-| updated_at | DateTime | ✓ | 更新日時 |
-
-**インデックス**:
-- `domain` (UNIQUE)
-- `expires_at`
-
-**バリデーション**:
-- `domain`: ドメイン形式
-
-**セキュリティ**:
-- `private_key`はMVPでは平文保存（Phase 2以降で暗号化を検討）
-
----
-
 ## ER図
 
 ```
@@ -161,17 +132,17 @@ SSL/TLS証明書（Let's Encrypt）
       │
       │ (WireGuard接続、設定のみ保持)
       │
-┌─────────┐        ┌─────────┐        ┌─────────────┐
-│  Agent  │◄──────│ Tunnel  │◄──────│ Certificate │
-└─────────┘ 1    * └─────────┘ 1    1 └─────────────┘
-                      (domain)           (domain)
+┌─────────┐        ┌─────────┐
+│  Agent  │◄──────│ Tunnel  │
+└─────────┘ 1    * └─────────┘
+                      (domain)
 ```
 
 **関係性**:
 - 1つの**Agent**は複数の**Tunnel**を持つ（1対多）
 - 1つの**Tunnel**は1つの**Agent**に属する（多対1）
-- 1つの**Tunnel**（domain）は1つの**Certificate**を持つ（1対1）
 - **Gateway**は設定のみ保持（Agent/Tunnelとの直接的なDB関係なし）
+- **TLS証明書**: GatewayがLet's Encrypt autocertで独立して管理（ControlのDBには保存しない）
 
 ---
 
@@ -186,7 +157,6 @@ export const agents = pgTable('agents', {
   name: varchar('name', { length: 64 }).notNull(),
   apiKey: varchar('api_key', { length: 64 }).notNull().unique(),
   wireguardPublicKey: varchar('wireguard_public_key', { length: 256 }).notNull().unique(),
-  wireguardPrivateKey: varchar('wireguard_private_key', { length: 256 }).notNull(),
   virtualIp: varchar('virtual_ip', { length: 15 }).notNull().unique(),
   subnet: varchar('subnet', { length: 18 }).notNull().unique(),
   status: varchar('status', { length: 16 }).notNull().default('offline'),
@@ -203,7 +173,6 @@ export const gateways = pgTable('gateways', {
   apiKey: varchar('api_key', { length: 64 }).notNull().unique(),
   publicIp: varchar('public_ip', { length: 15 }).notNull().unique(),
   wireguardPublicKey: varchar('wireguard_public_key', { length: 256 }).notNull().unique(),
-  wireguardPrivateKey: varchar('wireguard_private_key', { length: 256 }).notNull(),
   region: varchar('region', { length: 32 }),
   status: varchar('status', { length: 16 }).notNull().default('offline'),
   lastSeenAt: timestamp('last_seen_at'),
@@ -223,20 +192,9 @@ export const tunnels = pgTable('tunnels', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
-
-// schema/certificate.ts
-export const certificates = pgTable('certificates', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  domain: varchar('domain', { length: 255 }).notNull().unique(),
-  certificate: text('certificate').notNull(),
-  privateKey: text('private_key').notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-  autoRenew: boolean('auto_renew').notNull().default(true),
-  lastRenewedAt: timestamp('last_renewed_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
 ```
+
+**注**: TLS証明書はGatewayが独立して管理するため、certificatesテーブルは不要
 
 **注意**: SQLiteを使用する場合は、`pgTable`の代わりに`sqliteTable`を使用し、一部の型を調整する必要があります。
 
@@ -283,11 +241,10 @@ export const certificates = pgTable('certificates', {
     tunnels: [
       { domain: 'app.example.com', agentVirtualIp: '10.1.0.100', target: 'localhost:8080' },
     ],
-    certificates: [
-      { domain: 'app.example.com', certificate: '...', privateKey: '...' },
-    ],
   }
 }
+
+// 注: TLS証明書はGatewayが独立して管理するため、WebSocket経由での配信は不要
 ```
 
 ---
@@ -312,10 +269,12 @@ export const certificates = pgTable('certificates', {
 1. ユーザーがWebUIでTunnel作成
 2. Control がTunnelレコード作成（domain, agent_id, target）
 3. Control が全Gatewayに新しいTunnel設定を送信（WebSocket）
-4. Gateway がルーティング設定を更新
-5. Gateway がLet's Encryptで証明書取得
-6. Control がCertificateレコード作成
+4. Gateway がルーティング設定を更新（autocert HostPolicyにドメイン追加）
+5. Gateway が初回HTTPS接続時にLet's Encryptで証明書を自動取得
+6. 証明書はGatewayのローカルキャッシュ（/var/cache/autocert/）に保存
 ```
+
+**重要**: Control PlaneはTLS証明書の取得・保存・配布を一切行わない
 
 ---
 
@@ -443,71 +402,62 @@ const virtualIp = `10.${nextNumber}.0.100`;
 
 ## セキュリティ考慮事項
 
-### 秘密鍵の取り扱い
+### WireGuard鍵管理（ゼロ知識アーキテクチャ）
 
-#### MVP（Phase 1）
+#### MVP（Phase 1）- **ゼロ知識原則**
 
-**保存方法**:
-- WireGuard秘密鍵（`wireguard_private_key`）をSQLiteに**平文保存**
-- SSL証明書秘密鍵（`certificates.private_key`）をSQLiteに**平文保存**
-- 環境: 単一サーバーでControl、DB、WebUIが稼働
+**基本方針**:
+- **Control PlaneはWireGuard秘密鍵について一切関知しない**
+- Agent/Gatewayが自身の秘密鍵をローカルで生成・保持
+- Controlには**公開鍵のみ**を登録
+- Controlが侵害されても、WireGuardトンネルは保護される
 
-**リスク**:
-- データベースファイルへのアクセスがあれば秘密鍵が漏洩
-- MVP環境（個人利用、信頼できるネットワーク内）では許容
+**鍵生成フロー**:
 
-**対策**:
-- データベースファイル権限を`600`（所有者のみ読み書き）に制限
-- Controlサーバーへのアクセス制限（ファイアウォール、VPN）
-- バックアップファイルの暗号化
+1. **Agent/Gateway起動時**:
+   - ローカルで秘密鍵を生成（Curve25519）
+   - 秘密鍵をローカルファイルに保存（`/etc/kakuremichi/agent.conf`）
+   - 公開鍵を計算
 
-**WebSocket配信**:
-- **初回接続時のみ**秘密鍵を配信:
-  - Agent: `wireguardPrivateKey`を含む設定を送信
-  - Gateway: `wireguardPrivateKey`と`certificates[].privateKey`を送信
-- **再接続時は配信しない**:
-  - Agent/Gatewayはローカルに秘密鍵を保存（`/etc/kakuremichi/{agent,gateway}.conf`）
-  - 再接続時は公開鍵とメタデータのみ送信
+2. **Control への初回接続**:
+   - WebSocket接続時に`api_key`と`wireguard_public_key`を送信
+   - Controlは公開鍵のみをDBに保存
+   - 秘密鍵はネットワーク経由で送信されない
+
+3. **設定受信**:
+   - Controlから仮想IP、サブネット、他のPeerの公開鍵を受信
+   - ローカルの秘密鍵と組み合わせてWireGuardを設定
+
+**Controlが保存するデータ**:
+- ✅ WireGuard公開鍵（DBに保存）
+- ✅ 仮想IP、サブネット
+- ❌ WireGuard秘密鍵（**保存しない、配信しない**）
+
+**セキュリティ上のメリット**:
+- Controlサーバーが侵害されても、秘密鍵は漏洩しない
+- ネットワーク盗聴されても、秘密鍵は傍受されない
+- 秘密鍵はAgent/Gatewayのローカルディスクにのみ存在
+
+#### TLS証明書秘密鍵
+
+**SSL証明書の秘密鍵**:
+- **Gateway自身がautocertで取得・管理**（`gateway-http-proxy.md`参照）
+- Control PlaneはTLS証明書・秘密鍵について一切関知しない
+- 証明書はGatewayのローカルキャッシュに保存（`/var/cache/autocert/`）
+- 各Gatewayが独立してLet's Encryptから証明書を取得
+- Control Plane侵害時もTLS通信は保護される
 
 #### Phase 2以降
 
-**暗号化保存**:
-- **at-rest暗号化**: SQLiteファイル全体を暗号化（SQLCipher）
-- **カラムレベル暗号化**: AES-256で秘密鍵を暗号化して保存
-  ```typescript
-  import crypto from 'crypto';
+**秘密鍵ローテーション**:
+- Agent/Gatewayが定期的に新しい鍵ペアを生成
+- 新しい公開鍵をControlに登録
+- 古い鍵を無効化
 
-  const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY!; // 32 bytes
-
-  function encrypt(plaintext: string): string {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
-    let encrypted = cipher.update(plaintext, 'utf8', 'base64');
-    encrypted += cipher.final('base64');
-    return `${iv.toString('hex')}:${encrypted}`;
-  }
-
-  function decrypt(ciphertext: string): string {
-    const [ivHex, encrypted] = ciphertext.split(':');
-    const iv = Buffer.from(ivHex, 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
-    let decrypted = decipher.update(encrypted, 'base64', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-  }
-  ```
-
-**鍵ローテーション**:
-- WireGuard秘密鍵の定期的な再生成（30日ごと）
-- SSL証明書の自動更新（Let's Encrypt: 90日ごと）
-
-**HSM統合**:
-- エンタープライズ環境では HSM（Hardware Security Module）に秘密鍵を保存
-- AWS KMS、Azure Key Vault、Google Cloud KMS統合
-
-**監査ログ**:
-- 秘密鍵へのアクセスをログ記録
-- 異常なアクセスパターンの検出
+**証明書管理の強化**:
+- DNS-01チャレンジへの移行（複数Gateway環境でより確実）
+- 複数Gateway間での証明書共有（共有ストレージ使用、オプション）
+- ワイルドカード証明書対応（`*.example.com`）
 
 #### Agent/Gatewayローカル保存
 
