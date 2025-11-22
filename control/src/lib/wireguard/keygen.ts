@@ -13,9 +13,9 @@ export function generateWireguardKeyPair(): {
   const privateKeyBytes = randomBytes(32);
 
   // Clamp the private key (WireGuard requirement)
-  privateKeyBytes[0] &= 248;
-  privateKeyBytes[31] &= 127;
-  privateKeyBytes[31] |= 64;
+  privateKeyBytes[0]! &= 248;
+  privateKeyBytes[31]! &= 127;
+  privateKeyBytes[31]! |= 64;
 
   // Derive public key from private key
   const publicKeyBytes = x25519.getPublicKey(privateKeyBytes);

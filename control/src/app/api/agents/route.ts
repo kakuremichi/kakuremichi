@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       .values({
         name: validatedData.name,
         apiKey,
-        wireguardPublicKey: validatedData.wireguardPublicKey,
+        wireguardPublicKey: validatedData.wireguardPublicKey ?? null,
         virtualIp,
         subnet,
         status: 'offline',

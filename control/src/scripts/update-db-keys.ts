@@ -28,13 +28,12 @@ async function updateDatabaseKeys() {
       continue;
     }
 
-    // DB更新
+    // DB更新 (Note: Private key is generated on agent side, not stored in DB)
     await db
       .update(agents)
       .set({
-        wireguardPrivateKey: privateKey,
         wireguardPublicKey: publicKey,
-        virtualIP: virtualIP,
+        virtualIp: virtualIP,
       })
       .where(eq(agents.id, agent.id));
 
@@ -53,21 +52,20 @@ async function updateDatabaseKeys() {
     // WireGuard鍵ペア生成
     const { privateKey, publicKey } = generateWireguardKeyPair();
 
-    // publicIP設定（テスト用にlocalhost、本番では実際のIP）
-    const publicIP = gateway.publicIP || '127.0.0.1';
+    // publicIp設定（テスト用にlocalhost、本番では実際のIP）
+    const publicIp = gateway.publicIp || '127.0.0.1';
 
-    // DB更新
+    // DB更新 (Note: Private key is managed separately in gateway server, not stored in DB)
     await db
       .update(gateways)
       .set({
-        wireguardPrivateKey: privateKey,
         wireguardPublicKey: publicKey,
-        publicIP: publicIP,
+        publicIp: publicIp,
       })
       .where(eq(gateways.id, gateway.id));
 
     console.log(`  ✅ 更新完了`);
-    console.log(`     - publicIP: ${publicIP}`);
+    console.log(`     - publicIp: ${publicIp}`);
     console.log(`     - publicKey: ${publicKey.substring(0, 20)}...`);
   }
 

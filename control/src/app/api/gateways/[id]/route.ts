@@ -7,13 +7,14 @@ import { eq } from 'drizzle-orm';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const gateway = await db
       .select()
       .from(gateways)
-      .where(eq(gateways.id, params.id))
+      .where(eq(gateways.id, id))
       .limit(1);
 
     if (gateway.length === 0) {
@@ -35,12 +36,13 @@ export async function GET(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const deleted = await db
       .delete(gateways)
-      .where(eq(gateways.id, params.id))
+      .where(eq(gateways.id, id))
       .returning();
 
     if (deleted.length === 0) {
@@ -62,9 +64,10 @@ export async function DELETE(
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
     const { status, lastSeenAt } = body;
 
@@ -75,7 +78,7 @@ export async function PATCH(
         ...(lastSeenAt && { lastSeenAt: new Date(lastSeenAt) }),
         updatedAt: new Date(),
       })
-      .where(eq(gateways.id, params.id))
+      .where(eq(gateways.id, id))
       .returning();
 
     if (updated.length === 0) {

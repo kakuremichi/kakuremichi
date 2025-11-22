@@ -20,7 +20,7 @@ export async function generateGatewayWireguardConfig(
     throw new Error('Gateway not found');
   }
 
-  const gw = gateway[0];
+  const gw = gateway[0]!;
 
   // Get all agents to create peers
   const allAgents = await db.select().from(agents);
@@ -74,7 +74,7 @@ export async function generateAgentWireguardConfig(
     throw new Error('Agent not found');
   }
 
-  const ag = agent[0];
+  const ag = agent[0]!;
 
   // Get all gateways to create peers
   const allGateways = await db.select().from(gateways);
@@ -126,7 +126,7 @@ export async function getGatewayWireguardData(gatewayId: string) {
   const allAgents = await db.select().from(agents);
 
   return {
-    gateway: gateway[0],
+    gateway: gateway[0]!,
     peers: allAgents.map((agent) => ({
       publicKey: agent.wireguardPublicKey,
       allowedIPs: agent.subnet,
@@ -149,12 +149,13 @@ export async function getAgentWireguardData(agentId: string) {
     throw new Error('Agent not found');
   }
 
+  const ag = agent[0]!;
   const allGateways = await db.select().from(gateways);
 
   return {
-    agent: agent[0],
+    agent: ag,
     peers: allGateways.map((gateway, index) => {
-      const subnetMatch = agent[0].subnet.match(/^(\d+\.\d+\.\d+)\.\d+\/24$/);
+      const subnetMatch = ag.subnet.match(/^(\d+\.\d+\.\d+)\.\d+\/24$/);
       const gatewayIp = subnetMatch
         ? `${subnetMatch[1]}.${index + 1}`
         : '10.0.0.1';

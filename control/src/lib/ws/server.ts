@@ -97,7 +97,7 @@ export class ControlWebSocketServer {
           throw new Error('Invalid API key');
         }
 
-        clientId = gateway[0].id;
+        clientId = gateway[0]!.id;
 
         // Update last seen
         await db
@@ -118,13 +118,14 @@ export class ControlWebSocketServer {
           throw new Error('Invalid API key');
         }
 
-        clientId = agent[0].id;
+        const ag = agent[0]!;
+        clientId = ag.id;
 
         // Calculate virtualIp from subnet (always .100 in the agent's subnet)
         // Example: "10.1.0.0/24" -> "10.1.0.100"
         let virtualIp: string | null = null;
-        if (agent[0].subnet) {
-          const subnetMatch = agent[0].subnet.match(/^(\d+\.\d+\.\d+)\.\d+\/\d+$/);
+        if (ag.subnet) {
+          const subnetMatch = ag.subnet.match(/^(\d+\.\d+\.\d+)\.\d+\/\d+$/);
           if (subnetMatch) {
             virtualIp = `${subnetMatch[1]}.100`;
           }
@@ -372,7 +373,7 @@ export class ControlWebSocketServer {
       return;
     }
 
-    const agentData = agent[0];
+    const agentData = agent[0]!;
 
     // Get all gateways
     const allGateways = await db.select().from(gateways);

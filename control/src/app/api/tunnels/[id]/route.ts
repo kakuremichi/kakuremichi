@@ -8,13 +8,14 @@ import { eq } from 'drizzle-orm';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const tunnel = await db
       .select()
       .from(tunnels)
-      .where(eq(tunnels.id, params.id))
+      .where(eq(tunnels.id, id))
       .limit(1);
 
     if (tunnel.length === 0) {
@@ -36,9 +37,10 @@ export async function GET(
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
 
     // Validate request body
@@ -51,7 +53,7 @@ export async function PATCH(
         ...validatedData,
         updatedAt: new Date(),
       })
-      .where(eq(tunnels.id, params.id))
+      .where(eq(tunnels.id, id))
       .returning();
 
     if (updated.length === 0) {
@@ -81,12 +83,13 @@ export async function PATCH(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const deleted = await db
       .delete(tunnels)
-      .where(eq(tunnels.id, params.id))
+      .where(eq(tunnels.id, id))
       .returning();
 
     if (deleted.length === 0) {

@@ -49,7 +49,7 @@ export const ipv4Schema = z
  */
 export const createAgentSchema = z.object({
   name: nameSchema,
-  wireguardPublicKey: z.string().min(1, 'WireGuard public key is required'),
+  wireguardPublicKey: z.string().min(1).optional(),
 });
 
 /**
@@ -57,8 +57,8 @@ export const createAgentSchema = z.object({
  */
 export const createGatewaySchema = z.object({
   name: nameSchema,
-  publicIp: ipv4Schema,
-  wireguardPublicKey: z.string().min(1, 'WireGuard public key is required'),
+  publicIp: ipv4Schema.optional(),
+  wireguardPublicKey: z.string().min(1).optional(),
   region: z.string().max(32).optional(),
 });
 

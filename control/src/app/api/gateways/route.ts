@@ -38,9 +38,9 @@ export async function POST(request: NextRequest) {
       .values({
         name: validatedData.name,
         apiKey,
-        publicIp: validatedData.publicIp,
-        wireguardPublicKey: validatedData.wireguardPublicKey,
-        region: validatedData.region,
+        publicIp: validatedData.publicIp ?? null,
+        wireguardPublicKey: validatedData.wireguardPublicKey ?? null,
+        region: validatedData.region ?? null,
         status: 'offline',
       })
       .returning();
