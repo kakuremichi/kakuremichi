@@ -1,23 +1,14 @@
 #!/bin/sh
 set -e
 
-echo "Starting kakuremichi Control Server..."
+echo "Starting kakuremichi Control Server (HTTP + WS)..."
 
-# Start WebSocket server in background
-echo "Starting WebSocket server on port ${WS_PORT:-3001}..."
-npx tsx src/lib/ws/index.ts &
-WS_PID=$!
+# Single-process start: Next.js + WebSocket on the same port/path.
+PORT=${PORT:-3000}
+WS_PATH=${WS_PATH:-/ws}
 
-# Start Next.js server
-echo "Starting Next.js server on port ${PORT:-3000}..."
-node server.js &
-NEXT_PID=$!
+echo "HTTP: http://localhost:${PORT}"
+echo "WebSocket: ws://localhost:${PORT}${WS_PATH}"
 
-# Handle shutdown gracefully
-trap "echo 'Shutting down...'; kill $WS_PID $NEXT_PID 2>/dev/null; exit 0" SIGINT SIGTERM
-
-# Wait for any process to exit
-wait -n
-
-# Exit with status of process that exited first
-exit $?
+# Use tsx to run the custom server (expects `npm run build` done beforehand)
+exec npx tsx src/server.ts

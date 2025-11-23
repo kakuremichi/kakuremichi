@@ -53,7 +53,9 @@ export async function DELETE(
     // Gateways need to drop this agent from their config
     try {
       const wsServer = getWebSocketServer();
-      await wsServer.broadcastGatewayConfig();
+      if (wsServer) {
+        await wsServer.broadcastGatewayConfig();
+      }
     } catch (err) {
       console.error('Failed to broadcast agent delete config:', err);
     }
@@ -97,7 +99,9 @@ export async function PATCH(
     // Keep gateways up-to-date on agent status changes
     try {
       const wsServer = getWebSocketServer();
-      await wsServer.broadcastGatewayConfig();
+      if (wsServer) {
+        await wsServer.broadcastGatewayConfig();
+      }
     } catch (err) {
       console.error('Failed to broadcast agent update config:', err);
     }

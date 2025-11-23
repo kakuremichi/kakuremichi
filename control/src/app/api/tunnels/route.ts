@@ -76,9 +76,11 @@ export async function POST(request: NextRequest) {
     // Push latest config to gateways and the target agent (if online)
     try {
       const wsServer = getWebSocketServer();
-      await wsServer.broadcastGatewayConfig();
-      if (createdTunnel?.agentId) {
-        await wsServer.broadcastAgentConfig(createdTunnel.agentId);
+      if (wsServer) {
+        await wsServer.broadcastGatewayConfig();
+        if (createdTunnel?.agentId) {
+          await wsServer.broadcastAgentConfig(createdTunnel.agentId);
+        }
       }
     } catch (err) {
       console.error('Failed to broadcast tunnel creation config:', err);

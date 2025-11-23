@@ -54,7 +54,9 @@ export async function POST(request: NextRequest) {
     // Broadcast to all gateways so they learn about the new agent
     try {
       const wsServer = getWebSocketServer();
-      await wsServer.broadcastGatewayConfig();
+      if (wsServer) {
+        await wsServer.broadcastGatewayConfig();
+      }
     } catch (err) {
       console.error('Failed to broadcast agent creation config:', err);
     }

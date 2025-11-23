@@ -25,10 +25,7 @@ export function initWebSocketServer(
  * Get the initialized WebSocket server.
  * Throws if not initialized; API routes should catch and log.
  */
-export function getWebSocketServer(): ControlWebSocketServer {
-  if (!wsServer) {
-    throw new Error('WebSocket server is not initialized');
-  }
+export function getWebSocketServer(): ControlWebSocketServer | null {
   return wsServer;
 }
 

@@ -66,9 +66,11 @@ export async function PATCH(
     // Broadcast updated configs
     try {
       const wsServer = getWebSocketServer();
-      await wsServer.broadcastGatewayConfig();
-      if (updatedTunnel.agentId) {
-        await wsServer.broadcastAgentConfig(updatedTunnel.agentId);
+      if (wsServer) {
+        await wsServer.broadcastGatewayConfig();
+        if (updatedTunnel.agentId) {
+          await wsServer.broadcastAgentConfig(updatedTunnel.agentId);
+        }
       }
     } catch (err) {
       console.error('Failed to broadcast tunnel update config:', err);
@@ -115,9 +117,11 @@ export async function DELETE(
     // Broadcast updated configs
     try {
       const wsServer = getWebSocketServer();
-      await wsServer.broadcastGatewayConfig();
-      if (deletedTunnel.agentId) {
-        await wsServer.broadcastAgentConfig(deletedTunnel.agentId);
+      if (wsServer) {
+        await wsServer.broadcastGatewayConfig();
+        if (deletedTunnel.agentId) {
+          await wsServer.broadcastAgentConfig(deletedTunnel.agentId);
+        }
       }
     } catch (err) {
       console.error('Failed to broadcast tunnel delete config:', err);
