@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import type { Server as HTTPServer } from 'http';
 import { db, agents, gateways, tunnels } from '../db';
 import { eq } from 'drizzle-orm';
 import type {
@@ -16,10 +17,21 @@ export class ControlWebSocketServer {
   private clients: Map<string, ConnectedClient> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
-  constructor(port: number = 3001) {
-    this.wss = new WebSocketServer({ port });
+  constructor(
+    port: number = 3001,
+    server?: HTTPServer,
+    path: string = '/ws',
+  ) {
+    // If an existing HTTP server is provided, attach to it; otherwise, listen on the given port.
+    this.wss = server
+      ? new WebSocketServer({ server, path })
+      : new WebSocketServer({ port, path });
     this.setupServer();
-    console.log(`WebSocket server listening on port ${port}`);
+    if (server) {
+      console.log(`WebSocket server attached to existing server at path ${path}`);
+    } else {
+      console.log(`WebSocket server listening on port ${port}${path}`);
+    }
   }
 
   private setupServer() {
@@ -319,7 +331,34 @@ export class ControlWebSocketServer {
   /**
    * Send configuration to a Gateway
    */
-  private async sendGatewayConfig(gatewayId: string, ws: WebSocket) {
+  public async broadcastGatewayConfig(): Promise<void> {
+    console.log('Broadcasting Gateway config to all connected gateways');
+
+    for (const [clientId, client] of this.clients.entries()) {
+      if (client.type !== 'gateway' || !client.authenticated) continue;
+      try {
+        await this.sendGatewayConfig(clientId, client.ws);
+      } catch (error) {
+        console.error(`Failed to send Gateway config to ${clientId}:`, error);
+      }
+    }
+  }
+
+  public async broadcastAgentConfig(agentId: string): Promise<void> {
+    const client = this.clients.get(agentId);
+    if (!client || client.type !== 'agent' || !client.authenticated) {
+      console.log(`Agent ${agentId} not connected; skipping config push`);
+      return;
+    }
+
+    try {
+      await this.sendAgentConfig(agentId, client.ws);
+    } catch (error) {
+      console.error(`Failed to send Agent config to ${agentId}:`, error);
+    }
+  }
+
+  public async sendGatewayConfig(gatewayId: string, ws: WebSocket) {
     // Get all agents
     const allAgents = await db.select().from(agents);
 
@@ -361,7 +400,7 @@ export class ControlWebSocketServer {
   /**
    * Send configuration to an Agent
    */
-  private async sendAgentConfig(agentId: string, ws: WebSocket) {
+  public async sendAgentConfig(agentId: string, ws: WebSocket) {
     // Get agent info
     const agent = await db
       .select()
