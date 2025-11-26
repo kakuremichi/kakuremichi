@@ -141,27 +141,15 @@ export class ControlWebSocketServer {
           throw new Error('Invalid API key');
         }
 
-        const ag = agent[0]!;
-        clientId = ag.id;
+        clientId = agent[0]!.id;
 
-        // Calculate virtualIp from subnet (always .100 in the agent's subnet)
-        // Example: "10.1.0.0/24" -> "10.1.0.100"
-        let virtualIp: string | null = null;
-        if (ag.subnet) {
-          const subnetMatch = ag.subnet.match(/^(\d+\.\d+\.\d+)\.\d+\/\d+$/);
-          if (subnetMatch) {
-            virtualIp = `${subnetMatch[1]}.100`;
-          }
-        }
-
-        // Update agent with publicKey and calculated virtualIp
+        // Update agent with publicKey (virtualIp is now at tunnel level)
         await db
           .update(agents)
           .set({
             status: 'online',
             lastSeenAt: new Date(),
             wireguardPublicKey: message.publicKey,
-            virtualIp: virtualIp,
           })
           .where(eq(agents.id, clientId));
       }
@@ -374,25 +362,36 @@ export class ControlWebSocketServer {
     // Get all agents
     const allAgents = await db.select().from(agents);
 
-    // Get all tunnels
+    // Get all tunnels (with subnet info)
     const allTunnels = await db.select().from(tunnels);
 
     // Build agent list with WireGuard info
-    const agentList = allAgents.map((agent) => ({
-      id: agent.id,
-      name: agent.name,
-      wireguardPublicKey: agent.wireguardPublicKey,
-      subnet: agent.subnet,
-      virtualIP: agent.virtualIp,  // Fixed: use virtualIp not virtualIP
-    }));
+    // Each agent's AllowedIPs should be the agentIPs of its tunnels
+    const agentList = allAgents.map((agent) => {
+      // Get all tunnels for this agent and collect their agentIPs
+      const agentTunnels = allTunnels.filter(t => t.agentId === agent.id);
+      const allowedIPs = agentTunnels
+        .filter(t => t.agentIp)
+        .map(t => `${t.agentIp}/32`);
 
-    // Build tunnel list with agent info
+      return {
+        id: agent.id,
+        name: agent.name,
+        wireguardPublicKey: agent.wireguardPublicKey,
+        allowedIPs, // List of /32 IPs for WireGuard peer config
+      };
+    });
+
+    // Build tunnel list with network info
     const tunnelList = allTunnels.map((tunnel) => ({
       id: tunnel.id,
       domain: tunnel.domain,
       agentId: tunnel.agentId,
       target: tunnel.target,
       enabled: tunnel.enabled,
+      subnet: tunnel.subnet,
+      gatewayIp: tunnel.gatewayIp,
+      agentIp: tunnel.agentIp,
     }));
 
     const config = {
@@ -430,34 +429,45 @@ export class ControlWebSocketServer {
     // Get all gateways
     const allGateways = await db.select().from(gateways);
 
-    // Build gateway list with endpoint
-    const gatewayList = allGateways.map((gw) => ({
-      id: gw.id,
-      name: gw.name,
-      publicIp: gw.publicIp,  // Fixed: use publicIp not publicIP
-      wireguardPublicKey: gw.wireguardPublicKey,
-      endpoint: `${gw.publicIp}:51820`,  // Fixed: use publicIp not publicIP
-    }));
-
-    // Get tunnels for this agent
+    // Get tunnels for this agent (with subnet info)
     const agentTunnels = await db
       .select()
       .from(tunnels)
       .where(eq(tunnels.agentId, agentId));
 
+    // Build gateway list with endpoint
+    // Agent needs to know gateway IPs for each tunnel's subnet
+    const gatewayList = allGateways.map((gw) => {
+      // Collect all gatewayIPs from this agent's tunnels
+      const allowedIPs = agentTunnels
+        .filter(t => t.gatewayIp)
+        .map(t => `${t.gatewayIp}/32`);
+
+      return {
+        id: gw.id,
+        name: gw.name,
+        publicIp: gw.publicIp,
+        wireguardPublicKey: gw.wireguardPublicKey,
+        endpoint: gw.publicIp ? `${gw.publicIp}:51820` : null,
+        allowedIPs, // Gateway IPs for WireGuard peer config
+      };
+    });
+
+    // Build tunnel list with network info
     const tunnelList = agentTunnels.map((tunnel) => ({
       id: tunnel.id,
       domain: tunnel.domain,
       target: tunnel.target,
       enabled: tunnel.enabled,
+      subnet: tunnel.subnet,
+      gatewayIp: tunnel.gatewayIp,
+      agentIp: tunnel.agentIp,
     }));
 
     const config = {
       agent: {
         id: agentData.id,
         name: agentData.name,
-        virtualIp: agentData.virtualIp,  // Fixed: use virtualIp not virtualIP
-        subnet: agentData.subnet,
         wireguardPublicKey: agentData.wireguardPublicKey,
       },
       gateways: gatewayList,

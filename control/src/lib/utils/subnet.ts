@@ -1,72 +1,79 @@
-import { db, agents } from '../db';
-import { sql } from 'drizzle-orm';
+import { db, tunnels } from '../db';
+import { isNotNull } from 'drizzle-orm';
 
 /**
- * Get the next available subnet for a new Agent
- * Each Agent gets its own /24 subnet: 10.1.0.0/24, 10.2.0.0/24, etc.
- * @returns Next available subnet in CIDR format
+ * Subnet allocation result for a Tunnel
  */
-export async function getNextSubnet(): Promise<string> {
-  // Get all existing subnets
-  const existingAgents = await db.select({ subnet: agents.subnet }).from(agents);
+export interface TunnelSubnetAllocation {
+  subnet: string;    // e.g., "10.1.0.0/24"
+  gatewayIp: string; // e.g., "10.1.0.1"
+  agentIp: string;   // e.g., "10.1.0.100"
+}
 
-  if (existingAgents.length === 0) {
-    return '10.1.0.0/24';
-  }
+/**
+ * Allocate a new subnet for a Tunnel
+ * Each Tunnel gets its own /24 subnet: 10.1.0.0/24, 10.2.0.0/24, etc.
+ * @returns Subnet allocation with subnet, gatewayIp, and agentIp
+ */
+export async function allocateTunnelSubnet(): Promise<TunnelSubnetAllocation> {
+  // Get all existing subnets from tunnels
+  const existingTunnels = await db
+    .select({ subnet: tunnels.subnet })
+    .from(tunnels)
+    .where(isNotNull(tunnels.subnet));
 
   // Extract subnet numbers (10.X.0.0/24 -> X)
-  const usedNumbers = existingAgents
-    .map((agent) => {
-      // subnet is NOT NULL in the schema, safe to assert
-      const subnet = agent.subnet as string;
-      const match = subnet.match(/^10\.(\d+)\.0\.0\/24$/);
-      return match && match[1] ? parseInt(match[1], 10) : 0;
-    })
-    .filter((num) => num > 0);
+  const usedNumbers = new Set<number>();
+  for (const tunnel of existingTunnels) {
+    if (tunnel.subnet) {
+      const match = tunnel.subnet.match(/^10\.(\d+)\.0\.0\/24$/);
+      if (match && match[1]) {
+        usedNumbers.add(parseInt(match[1], 10));
+      }
+    }
+  }
 
-  // Find the next available number
-  const maxNumber = Math.max(...usedNumbers);
-  const nextNumber = maxNumber + 1;
+  // Find the next available number (start from 1)
+  let nextNumber = 1;
+  while (usedNumbers.has(nextNumber) && nextNumber <= 254) {
+    nextNumber++;
+  }
 
   if (nextNumber > 254) {
-    throw new Error('Subnet limit reached (max: 10.254.0.0/24)');
+    throw new Error('Subnet limit reached (max: 254 tunnels)');
   }
 
-  return `10.${nextNumber}.0.0/24`;
+  return {
+    subnet: `10.${nextNumber}.0.0/24`,
+    gatewayIp: `10.${nextNumber}.0.1`,
+    agentIp: `10.${nextNumber}.0.100`,
+  };
 }
 
 /**
- * Get the virtual IP for an Agent based on its subnet
- * Agent always gets .100 in its subnet
+ * Parse a subnet and extract its components
  * @param subnet Subnet in CIDR format (e.g., "10.1.0.0/24")
- * @returns Virtual IP address
+ * @returns Parsed subnet info or null if invalid
  */
-export function getVirtualIpFromSubnet(subnet: string): string {
-  const match = subnet.match(/^(10\.\d+\.0)\.\d+\/24$/);
-  if (!match) {
-    throw new Error('Invalid subnet format');
+export function parseSubnet(subnet: string): { number: number; gatewayIp: string; agentIp: string } | null {
+  const match = subnet.match(/^10\.(\d+)\.0\.0\/24$/);
+  if (!match || !match[1]) {
+    return null;
   }
 
-  return `${match[1]}.100`;
+  const num = parseInt(match[1], 10);
+  return {
+    number: num,
+    gatewayIp: `10.${num}.0.1`,
+    agentIp: `10.${num}.0.100`,
+  };
 }
 
 /**
- * Get the Gateway IPs for a given subnet
- * Gateways get .1, .2, .3, etc. in the Agent's subnet
- * @param subnet Subnet in CIDR format
- * @param gatewayIndex Gateway index (0-based)
- * @returns Gateway IP address in this subnet
+ * Validate a subnet format
+ * @param subnet Subnet string to validate
+ * @returns true if valid
  */
-export function getGatewayIpInSubnet(subnet: string, gatewayIndex: number): string {
-  const match = subnet.match(/^(10\.\d+\.0)\.\d+\/24$/);
-  if (!match) {
-    throw new Error('Invalid subnet format');
-  }
-
-  const gatewayIp = gatewayIndex + 1; // .1, .2, .3, ...
-  if (gatewayIp < 1 || gatewayIp > 99) {
-    throw new Error('Gateway index out of range (max: 99)');
-  }
-
-  return `${match[1]}.${gatewayIp}`;
+export function isValidSubnet(subnet: string): boolean {
+  return /^10\.\d{1,3}\.0\.0\/24$/.test(subnet);
 }

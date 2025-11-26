@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tunnels, agents } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
-import { createTunnelSchema } from '@/lib/utils/validation';
+import { createTunnelSchema, allocateTunnelSubnet } from '@/lib/utils';
 import { eq } from 'drizzle-orm';
 
 /**
@@ -17,6 +17,9 @@ export async function GET() {
         target: tunnels.target,
         enabled: tunnels.enabled,
         description: tunnels.description,
+        subnet: tunnels.subnet,
+        gatewayIp: tunnels.gatewayIp,
+        agentIp: tunnels.agentIp,
         createdAt: tunnels.createdAt,
         updatedAt: tunnels.updatedAt,
         agent: {
@@ -59,7 +62,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
     }
 
-    // Insert tunnel
+    // Allocate a new subnet for this tunnel
+    const subnetAllocation = await allocateTunnelSubnet();
+
+    // Insert tunnel with subnet allocation
     const newTunnel = await db
       .insert(tunnels)
       .values({
@@ -68,6 +74,9 @@ export async function POST(request: NextRequest) {
         target: validatedData.target,
         description: validatedData.description,
         enabled: true,
+        subnet: subnetAllocation.subnet,
+        gatewayIp: subnetAllocation.gatewayIp,
+        agentIp: subnetAllocation.agentIp,
       })
       .returning();
 
