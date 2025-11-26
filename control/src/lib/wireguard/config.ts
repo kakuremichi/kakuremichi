@@ -1,4 +1,4 @@
-import { db, agents, gateways, tunnels } from '../db';
+import { db, agents, gateways, tunnels, tunnelGatewayIps } from '../db';
 import { eq, isNotNull } from 'drizzle-orm';
 
 /**
@@ -28,6 +28,14 @@ export async function generateGatewayWireguardConfig(
     .from(tunnels)
     .where(isNotNull(tunnels.subnet));
 
+  // Get this gateway's IPs from tunnel_gateway_ips
+  const gatewayIps = await db
+    .select()
+    .from(tunnelGatewayIps)
+    .where(eq(tunnelGatewayIps.gatewayId, gatewayId));
+
+  const gatewayIpByTunnel = new Map(gatewayIps.map(ip => [ip.tunnelId, ip.ip]));
+
   // Get all agents for peer info
   const allAgents = await db.select().from(agents);
   const agentMap = new Map(allAgents.map(a => [a.id, a]));
@@ -38,14 +46,16 @@ export async function generateGatewayWireguardConfig(
   config += `PrivateKey = <GATEWAY_PRIVATE_KEY>\n`;
   config += `ListenPort = 51820\n`;
 
-  // Add addresses for all tunnel subnets (gateway gets gatewayIp)
+  // Add addresses for all tunnel subnets (this gateway's IPs)
   const addresses = allTunnels
-    .filter(t => t.gatewayIp && t.subnet)
     .map(t => {
-      const subnetMatch = t.subnet!.match(/\/(\d+)$/);
-      const prefix = subnetMatch ? subnetMatch[1] : '24';
-      return `${t.gatewayIp}/${prefix}`;
-    });
+      const ip = gatewayIpByTunnel.get(t.id);
+      if (!ip || !t.subnet) return null;
+      const subnetMatch = t.subnet.match(/\/(\d+)$/);
+      const prefix = subnetMatch && subnetMatch[1] ? subnetMatch[1] : '24';
+      return `${ip}/${prefix}`;
+    })
+    .filter((addr): addr is string => addr !== null);
 
   if (addresses.length > 0) {
     config += `Address = ${addresses.join(', ')}\n`;
@@ -112,12 +122,28 @@ export async function generateAgentWireguardConfig(
   // Get all gateways to create peers
   const allGateways = await db.select().from(gateways);
 
+  // Get gateway IPs for this agent's tunnels
+  const tunnelIds = agentTunnels.map(t => t.id);
+  const allGatewayIps = tunnelIds.length > 0
+    ? await db.select().from(tunnelGatewayIps)
+    : [];
+  const relevantGatewayIps = allGatewayIps.filter(ip => tunnelIds.includes(ip.tunnelId));
+
+  // Group gateway IPs by gateway
+  const gatewayIpsByGateway = new Map<string, string[]>();
+  for (const ip of relevantGatewayIps) {
+    if (!gatewayIpsByGateway.has(ip.gatewayId)) {
+      gatewayIpsByGateway.set(ip.gatewayId, []);
+    }
+    gatewayIpsByGateway.get(ip.gatewayId)!.push(`${ip.ip}/32`);
+  }
+
   // Collect virtual IPs from tunnels
   const virtualIPs = agentTunnels
     .filter(t => t.agentIp && t.subnet)
     .map(t => {
       const subnetMatch = t.subnet!.match(/\/(\d+)$/);
-      const prefix = subnetMatch ? subnetMatch[1] : '24';
+      const prefix = subnetMatch && subnetMatch[1] ? subnetMatch[1] : '24';
       return `${t.agentIp}/${prefix}`;
     });
 
@@ -130,19 +156,16 @@ export async function generateAgentWireguardConfig(
   }
   config += `\n`;
 
-  // Collect gateway IPs from tunnels
-  const gatewayIPs = agentTunnels
-    .filter(t => t.gatewayIp)
-    .map(t => `${t.gatewayIp}/32`);
-
-  // Add peers (Gateways)
+  // Add peers (Gateways) with their IPs for this agent's tunnels
   for (const gateway of allGateways) {
+    const allowedIPs = gatewayIpsByGateway.get(gateway.id) || [];
+
     config += `[Peer]\n`;
     config += `# Gateway: ${gateway.name}\n`;
     config += `PublicKey = ${gateway.wireguardPublicKey}\n`;
     config += `Endpoint = ${gateway.publicIp}:51820\n`;
-    if (gatewayIPs.length > 0) {
-      config += `AllowedIPs = ${gatewayIPs.join(', ')}\n`;
+    if (allowedIPs.length > 0) {
+      config += `AllowedIPs = ${allowedIPs.join(', ')}\n`;
     }
     config += `PersistentKeepalive = 25\n`;
     config += `\n`;
@@ -231,10 +254,21 @@ export async function getAgentWireguardData(agentId: string) {
 
   const allGateways = await db.select().from(gateways);
 
-  // Collect gateway IPs from tunnels
-  const gatewayIPs = agentTunnels
-    .filter(t => t.gatewayIp)
-    .map(t => `${t.gatewayIp}/32`);
+  // Get gateway IPs for this agent's tunnels
+  const tunnelIds = agentTunnels.map(t => t.id);
+  const allGatewayIps = tunnelIds.length > 0
+    ? await db.select().from(tunnelGatewayIps)
+    : [];
+  const relevantGatewayIps = allGatewayIps.filter(ip => tunnelIds.includes(ip.tunnelId));
+
+  // Group gateway IPs by gateway
+  const gatewayIpsByGateway = new Map<string, string[]>();
+  for (const ip of relevantGatewayIps) {
+    if (!gatewayIpsByGateway.has(ip.gatewayId)) {
+      gatewayIpsByGateway.set(ip.gatewayId, []);
+    }
+    gatewayIpsByGateway.get(ip.gatewayId)!.push(`${ip.ip}/32`);
+  }
 
   return {
     agent: ag,
@@ -244,7 +278,7 @@ export async function getAgentWireguardData(agentId: string) {
     peers: allGateways.map((gateway) => ({
       publicKey: gateway.wireguardPublicKey,
       endpoint: `${gateway.publicIp}:51820`,
-      allowedIPs: gatewayIPs.join(', '),
+      allowedIPs: (gatewayIpsByGateway.get(gateway.id) || []).join(', '),
       name: gateway.name,
     })),
   };

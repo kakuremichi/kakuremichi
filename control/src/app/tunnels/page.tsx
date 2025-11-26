@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from 'react'
 
+interface GatewayIP {
+  gatewayId: string
+  gatewayName: string
+  ip: string
+}
+
 interface Tunnel {
   id: string
   domain: string
@@ -9,8 +15,8 @@ interface Tunnel {
   agentId: string
   enabled: boolean
   subnet: string | null
-  gatewayIp: string | null
   agentIp: string | null
+  gatewayIps: GatewayIP[]
   createdAt: string
   updatedAt: string
 }
@@ -193,8 +199,17 @@ export default function TunnelsPage() {
                       <div>
                         <div><code>{tunnel.subnet}</code></div>
                         <div style={{ color: '#666' }}>
-                          GW: {tunnel.gatewayIp} / Agent: {tunnel.agentIp}
+                          Agent: {tunnel.agentIp}
                         </div>
+                        {tunnel.gatewayIps && tunnel.gatewayIps.length > 0 && (
+                          <div style={{ color: '#666', marginTop: '4px' }}>
+                            {tunnel.gatewayIps.map((gw) => (
+                              <div key={gw.gatewayId}>
+                                GW ({gw.gatewayName}): {gw.ip}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <span style={{ color: '#999' }}>-</span>

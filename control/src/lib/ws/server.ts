@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server as HTTPServer, IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
-import { db, agents, gateways, tunnels } from '../db';
+import { db, agents, gateways, tunnels, tunnelGatewayIps } from '../db';
 import { eq } from 'drizzle-orm';
 import type {
   WSMessage,
@@ -327,7 +327,7 @@ export class ControlWebSocketServer {
   }
 
   /**
-   * Send configuration to a Gateway
+   * Send configuration to all connected Gateways
    */
   public async broadcastGatewayConfig(): Promise<void> {
     console.log('Broadcasting Gateway config to all connected gateways');
@@ -342,8 +342,11 @@ export class ControlWebSocketServer {
     }
   }
 
+  /**
+   * Send configuration to a specific Agent
+   */
   public async broadcastAgentConfig(agentId: string): Promise<void> {
-      console.log('Broadcasting Agent config to all connected gateways');
+    console.log(`Broadcasting Agent config to agent ${agentId}`);
 
     const client = this.clients.get(agentId);
     if (!client || client.type !== 'agent' || !client.authenticated) {
@@ -358,12 +361,43 @@ export class ControlWebSocketServer {
     }
   }
 
+  /**
+   * Send configuration to all connected Agents
+   */
+  public async broadcastAllAgentConfigs(): Promise<void> {
+    console.log('Broadcasting Agent config to all connected agents');
+
+    for (const [clientId, client] of this.clients.entries()) {
+      if (client.type !== 'agent' || !client.authenticated) continue;
+      try {
+        await this.sendAgentConfig(clientId, client.ws);
+      } catch (error) {
+        console.error(`Failed to send Agent config to ${clientId}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Send configuration to a Gateway
+   * Gateway needs:
+   * - List of agents with their WireGuard public keys and AllowedIPs (agent IPs from tunnels)
+   * - List of tunnels with this gateway's specific IP for each tunnel
+   */
   public async sendGatewayConfig(gatewayId: string, ws: WebSocket) {
     // Get all agents
     const allAgents = await db.select().from(agents);
 
-    // Get all tunnels (with subnet info)
+    // Get all tunnels
     const allTunnels = await db.select().from(tunnels);
+
+    // Get this gateway's IPs for all tunnels
+    const gatewayIps = await db
+      .select()
+      .from(tunnelGatewayIps)
+      .where(eq(tunnelGatewayIps.gatewayId, gatewayId));
+
+    // Create a map of tunnelId -> this gateway's IP
+    const gatewayIpByTunnel = new Map(gatewayIps.map(ip => [ip.tunnelId, ip.ip]));
 
     // Build agent list with WireGuard info
     // Each agent's AllowedIPs should be the agentIPs of its tunnels
@@ -382,7 +416,7 @@ export class ControlWebSocketServer {
       };
     });
 
-    // Build tunnel list with network info
+    // Build tunnel list with network info (including this gateway's IP)
     const tunnelList = allTunnels.map((tunnel) => ({
       id: tunnel.id,
       domain: tunnel.domain,
@@ -390,7 +424,7 @@ export class ControlWebSocketServer {
       target: tunnel.target,
       enabled: tunnel.enabled,
       subnet: tunnel.subnet,
-      gatewayIp: tunnel.gatewayIp,
+      gatewayIp: gatewayIpByTunnel.get(tunnel.id) || null, // This gateway's IP for this tunnel
       agentIp: tunnel.agentIp,
     }));
 
@@ -410,6 +444,9 @@ export class ControlWebSocketServer {
 
   /**
    * Send configuration to an Agent
+   * Agent needs:
+   * - List of gateways with their WireGuard public keys, endpoints, and AllowedIPs (gateway IPs from tunnels)
+   * - List of tunnels with all gateway IPs for each tunnel
    */
   public async sendAgentConfig(agentId: string, ws: WebSocket) {
     // Get agent info
@@ -429,19 +466,42 @@ export class ControlWebSocketServer {
     // Get all gateways
     const allGateways = await db.select().from(gateways);
 
-    // Get tunnels for this agent (with subnet info)
+    // Get tunnels for this agent
     const agentTunnels = await db
       .select()
       .from(tunnels)
       .where(eq(tunnels.agentId, agentId));
 
-    // Build gateway list with endpoint
-    // Agent needs to know gateway IPs for each tunnel's subnet
+    // Get all gateway IPs for this agent's tunnels
+    const tunnelIds = agentTunnels.map(t => t.id);
+    const allGatewayIps = tunnelIds.length > 0
+      ? await db.select().from(tunnelGatewayIps)
+      : [];
+
+    // Filter to only this agent's tunnels
+    const relevantGatewayIps = allGatewayIps.filter(ip => tunnelIds.includes(ip.tunnelId));
+
+    // Group gateway IPs by tunnel
+    const gatewayIpsByTunnel = new Map<string, Array<{ gatewayId: string; ip: string }>>();
+    for (const ip of relevantGatewayIps) {
+      if (!gatewayIpsByTunnel.has(ip.tunnelId)) {
+        gatewayIpsByTunnel.set(ip.tunnelId, []);
+      }
+      gatewayIpsByTunnel.get(ip.tunnelId)!.push({ gatewayId: ip.gatewayId, ip: ip.ip });
+    }
+
+    // Collect all unique gateway IPs across all tunnels, grouped by gateway
+    const gatewayIpsByGateway = new Map<string, string[]>();
+    for (const ip of relevantGatewayIps) {
+      if (!gatewayIpsByGateway.has(ip.gatewayId)) {
+        gatewayIpsByGateway.set(ip.gatewayId, []);
+      }
+      gatewayIpsByGateway.get(ip.gatewayId)!.push(`${ip.ip}/32`);
+    }
+
+    // Build gateway list with endpoint and AllowedIPs
     const gatewayList = allGateways.map((gw) => {
-      // Collect all gatewayIPs from this agent's tunnels
-      const allowedIPs = agentTunnels
-        .filter(t => t.gatewayIp)
-        .map(t => `${t.gatewayIp}/32`);
+      const allowedIPs = gatewayIpsByGateway.get(gw.id) || [];
 
       return {
         id: gw.id,
@@ -449,20 +509,24 @@ export class ControlWebSocketServer {
         publicIp: gw.publicIp,
         wireguardPublicKey: gw.wireguardPublicKey,
         endpoint: gw.publicIp ? `${gw.publicIp}:51820` : null,
-        allowedIPs, // Gateway IPs for WireGuard peer config
+        allowedIPs, // This gateway's IPs for WireGuard peer config
       };
     });
 
-    // Build tunnel list with network info
-    const tunnelList = agentTunnels.map((tunnel) => ({
-      id: tunnel.id,
-      domain: tunnel.domain,
-      target: tunnel.target,
-      enabled: tunnel.enabled,
-      subnet: tunnel.subnet,
-      gatewayIp: tunnel.gatewayIp,
-      agentIp: tunnel.agentIp,
-    }));
+    // Build tunnel list with all gateway IPs
+    const tunnelList = agentTunnels.map((tunnel) => {
+      const tunnelGatewayIpList = gatewayIpsByTunnel.get(tunnel.id) || [];
+
+      return {
+        id: tunnel.id,
+        domain: tunnel.domain,
+        target: tunnel.target,
+        enabled: tunnel.enabled,
+        subnet: tunnel.subnet,
+        agentIp: tunnel.agentIp,
+        gatewayIps: tunnelGatewayIpList, // All gateway IPs for this tunnel
+      };
+    });
 
     const config = {
       agent: {
