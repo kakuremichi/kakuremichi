@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, gateways } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
+import { getWebSocketServer } from '@/lib/ws';
+
+async function broadcastGatewayChange() {
+  try {
+    const wsServer = getWebSocketServer();
+    if (!wsServer) return;
+    await wsServer.broadcastGatewayConfig();
+    await wsServer.broadcastAllAgentConfigs();
+  } catch (err) {
+    console.error('Failed to broadcast gateway change:', err);
+  }
+}
 
 export async function GET(
   request: NextRequest,
@@ -33,6 +45,7 @@ export async function DELETE(
       if (deleted.length === 0) {
         return NextResponse.json({ error: 'Gateway not found' }, { status: 404 });
       }
+      await broadcastGatewayChange();
       return NextResponse.json({ success: true });
     } catch (error) {
       console.error('Failed to delete gateway:', error);
@@ -65,6 +78,7 @@ export async function PATCH(
       if (updated.length === 0) {
         return NextResponse.json({ error: 'Gateway not found' }, { status: 404 });
       }
+      await broadcastGatewayChange();
       return NextResponse.json(updated[0]);
     } catch (error) {
       console.error('Failed to update gateway:', error);

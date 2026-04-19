@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tunnels, agents, tunnelGatewayIps, gateways } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
-import { createTunnelSchema, allocateTunnelSubnet, allocateGatewayIpsForTunnel } from '@/lib/utils';
+import { createTunnelSchema, allocateTunnelSubnetSync, allocateGatewayIpsForTunnel } from '@/lib/utils';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
 
@@ -72,31 +72,43 @@ export async function POST(request: NextRequest) {
       const body = await request.json();
       const validatedData = createTunnelSchema.parse(body);
 
-      const agent = await db.select().from(agents).where(eq(agents.id, validatedData.agentId)).limit(1);
-      if (agent.length === 0) {
+      const result = db.transaction((tx) => {
+        const agentRow = tx
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.id, validatedData.agentId))
+          .limit(1)
+          .all();
+        if (agentRow.length === 0) {
+          return { agentMissing: true as const };
+        }
+
+        const subnetAllocation = allocateTunnelSubnetSync(tx);
+
+        const inserted = tx
+          .insert(tunnels)
+          .values({
+            domain: validatedData.domain,
+            agentId: validatedData.agentId,
+            target: validatedData.target,
+            description: validatedData.description,
+            enabled: true,
+            subnet: subnetAllocation.subnet,
+            agentIp: subnetAllocation.agentIp,
+            httpProxyEnabled: validatedData.httpProxyEnabled ?? false,
+            socksProxyEnabled: validatedData.socksProxyEnabled ?? false,
+          })
+          .returning()
+          .get();
+        return { tunnel: inserted, subnet: subnetAllocation.subnet };
+      });
+
+      if ('agentMissing' in result) {
         return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
       }
-
-      const subnetAllocation = await allocateTunnelSubnet();
-
-      const newTunnel = await db
-        .insert(tunnels)
-        .values({
-          domain: validatedData.domain,
-          agentId: validatedData.agentId,
-          target: validatedData.target,
-          description: validatedData.description,
-          enabled: true,
-          subnet: subnetAllocation.subnet,
-          agentIp: subnetAllocation.agentIp,
-          httpProxyEnabled: validatedData.httpProxyEnabled ?? false,
-          socksProxyEnabled: validatedData.socksProxyEnabled ?? false,
-        })
-        .returning();
-
-      const createdTunnel = newTunnel[0];
+      const createdTunnel = result.tunnel;
       if (createdTunnel) {
-        await allocateGatewayIpsForTunnel(createdTunnel.id, subnetAllocation.subnet);
+        await allocateGatewayIpsForTunnel(createdTunnel.id, result.subnet);
       }
 
       try {

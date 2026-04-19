@@ -1,5 +1,6 @@
 import { db, tunnels, gateways, tunnelGatewayIps } from '../db';
 import { eq, isNotNull, and } from 'drizzle-orm';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 
 /**
  * Subnet allocation result for a Tunnel
@@ -9,20 +10,20 @@ export interface TunnelSubnetAllocation {
   agentIp: string;   // e.g., "10.1.0.2" (from front)
 }
 
+type SubnetAllocator = Pick<BetterSQLite3Database<any>, 'select'>;
+
 /**
- * Allocate a new subnet for a Tunnel
- * Each Tunnel gets its own /24 subnet: 10.1.0.0/24, 10.2.0.0/24, etc.
- * Agent IP is assigned from the front (.2)
- * @returns Subnet allocation with subnet and agentIp
+ * Pick the next free /24 subnet and agent IP.
+ * Callers must run this inside a transaction together with the tunnel INSERT
+ * so concurrent allocations cannot reuse the same subnet.
  */
-export async function allocateTunnelSubnet(): Promise<TunnelSubnetAllocation> {
-  // Get all existing subnets from tunnels
-  const existingTunnels = await db
+export function allocateTunnelSubnetSync(tx: SubnetAllocator): TunnelSubnetAllocation {
+  const existingTunnels = tx
     .select({ subnet: tunnels.subnet })
     .from(tunnels)
-    .where(isNotNull(tunnels.subnet));
+    .where(isNotNull(tunnels.subnet))
+    .all();
 
-  // Extract subnet numbers (10.X.0.0/24 -> X)
   const usedNumbers = new Set<number>();
   for (const tunnel of existingTunnels) {
     if (tunnel.subnet) {
@@ -33,7 +34,6 @@ export async function allocateTunnelSubnet(): Promise<TunnelSubnetAllocation> {
     }
   }
 
-  // Find the next available number (start from 1)
   let nextNumber = 1;
   while (usedNumbers.has(nextNumber) && nextNumber <= 254) {
     nextNumber++;
@@ -45,8 +45,16 @@ export async function allocateTunnelSubnet(): Promise<TunnelSubnetAllocation> {
 
   return {
     subnet: `10.${nextNumber}.0.0/24`,
-    agentIp: `10.${nextNumber}.0.2`,  // Agent IP from front (.2, .1 is reserved)
+    agentIp: `10.${nextNumber}.0.2`,
   };
+}
+
+/**
+ * Async wrapper for callers that still want a standalone allocation.
+ * Prefer running this inside a transaction via allocateTunnelSubnetSync.
+ */
+export async function allocateTunnelSubnet(): Promise<TunnelSubnetAllocation> {
+  return allocateTunnelSubnetSync(db as unknown as SubnetAllocator);
 }
 
 /**

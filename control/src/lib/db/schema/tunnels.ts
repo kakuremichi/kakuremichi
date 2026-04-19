@@ -10,9 +10,10 @@ export const tunnels = sqliteTable('tunnels', {
   target: text('target', { length: 255 }).notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   description: text('description'),
-  // Network configuration (assigned automatically on tunnel creation)
-  subnet: text('subnet', { length: 18 }),      // e.g., "10.1.0.0/24"
-  agentIp: text('agent_ip', { length: 15 }),   // e.g., "10.1.0.2" (from front)
+  // Network configuration (assigned automatically on tunnel creation).
+  // Unique to avoid races during concurrent allocations.
+  subnet: text('subnet', { length: 18 }).unique(),      // e.g., "10.1.0.0/24"
+  agentIp: text('agent_ip', { length: 15 }).unique(),   // e.g., "10.1.0.2" (from front)
   // Note: Gateway IPs are now stored in tunnel_gateway_ips table (multiple gateways per tunnel)
   // Exit Node (Outbound Proxy) settings
   httpProxyEnabled: integer('http_proxy_enabled', { mode: 'boolean' }).notNull().default(false),
