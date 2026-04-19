@@ -1,22 +1,22 @@
+import { db, agents, gateways, tunnels } from '@/lib/db'
+
 export const dynamic = 'force-dynamic'
 
 async function getStats() {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
-
   try {
-    const [agents, gateways, tunnels] = await Promise.all([
-      fetch(`${baseUrl}/api/agents`, { cache: 'no-store' }).then(r => r.json()),
-      fetch(`${baseUrl}/api/gateways`, { cache: 'no-store' }).then(r => r.json()),
-      fetch(`${baseUrl}/api/tunnels`, { cache: 'no-store' }).then(r => r.json()),
+    const [agentRows, gatewayRows, tunnelRows] = await Promise.all([
+      db.select().from(agents),
+      db.select().from(gateways),
+      db.select().from(tunnels),
     ])
 
     return {
-      agentsCount: agents.length,
-      gatewaysCount: gateways.length,
-      tunnelsCount: tunnels.length,
-      activeTunnels: tunnels.filter((t: any) => t.enabled).length,
-      onlineAgents: agents.filter((a: any) => a.status === 'online').length,
-      onlineGateways: gateways.filter((g: any) => g.status === 'online').length,
+      agentsCount: agentRows.length,
+      gatewaysCount: gatewayRows.length,
+      tunnelsCount: tunnelRows.length,
+      activeTunnels: tunnelRows.filter(t => t.enabled).length,
+      onlineAgents: agentRows.filter(a => a.status === 'online').length,
+      onlineGateways: gatewayRows.filter(g => g.status === 'online').length,
     }
   } catch (error) {
     console.error('Failed to fetch stats:', error)
@@ -87,6 +87,7 @@ export default async function Home() {
           <a href="/agents"><button>Manage Agents</button></a>
           <a href="/gateways"><button>Manage Gateways</button></a>
           <a href="/tunnels"><button>Manage Tunnels</button></a>
+          <a href="/settings/tokens"><button>API Tokens</button></a>
         </div>
       </div>
     </div>

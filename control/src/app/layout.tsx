@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import './globals.css'
+import { AuthGate } from './auth-gate'
 
 export const metadata: Metadata = {
   title: 'kakuremichi - Control Panel',
@@ -23,12 +24,13 @@ export default function RootLayout({
               <li><Link href="/agents">Agents</Link></li>
               <li><Link href="/gateways">Gateways</Link></li>
               <li><Link href="/tunnels">Tunnels</Link></li>
+              <li><Link href="/settings/tokens">Tokens</Link></li>
             </ul>
           </div>
         </nav>
         <main>
           <div className="container">
-            {children}
+            <AuthGate>{children}</AuthGate>
           </div>
         </main>
       </body>

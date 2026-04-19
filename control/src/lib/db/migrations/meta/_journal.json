@@ -50,6 +50,13 @@
       "when": 1764858072059,
       "tag": "0006_parched_captain_america",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1776592431067,
+      "tag": "0007_wealthy_tempest",
+      "breakpoints": true
     }
   ]
 }

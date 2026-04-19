@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx src/server.ts",
-    "dev:ws": "tsx src/lib/ws/index.ts",
+    "dev": "next dev",
+    "dev:custom": "tsx src/server.ts",
+    "dev:ws": "tsx src/scripts/ws-server.ts",
     "build": "next build",
     "start": "tsx src/scripts/start-servers.ts",
     "lint": "next lint",

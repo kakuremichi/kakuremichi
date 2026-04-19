@@ -4,6 +4,7 @@ import http from 'http';
 import { parse } from 'url';
 import next from 'next';
 import { initWebSocketServer } from './lib/ws';
+import { ensureInitialAdmin } from './lib/auth';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const WS_PATH = process.env.WS_PATH || '/ws';
@@ -14,6 +15,7 @@ async function start() {
   const handle = app.getRequestHandler();
 
   await app.prepare();
+  await ensureInitialAdmin();
 
   const upgrade = app.getUpgradeHandler();
 

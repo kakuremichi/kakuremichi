@@ -2,9 +2,8 @@
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  serverExternalPackages: ['better-sqlite3'],
   experimental: {},
-  // WebSocket サーバー用のカスタムサーバーを使用しない場合
-  // Phase 1 では開発を簡略化するため、WebSocket は別ポートで起動
 };
 
 module.exports = nextConfig;
