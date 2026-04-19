@@ -1,5 +1,7 @@
 #!/usr/bin/env tsx
 
+// IMPORTANT: must be imported before `next`. See polyfill-als.ts.
+import './polyfill-als';
 import http from 'http';
 import { parse } from 'url';
 import next from 'next';

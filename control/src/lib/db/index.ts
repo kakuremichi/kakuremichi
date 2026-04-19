@@ -13,8 +13,12 @@ if (!fs.existsSync(dbDir)) {
 }
 
 const sqlite = new Database(dbPath);
-sqlite.pragma('journal_mode = WAL');
+// Allow tests to use journal_mode=DELETE so two processes (HTTP + WS) sharing
+// the same DB file don't trip over WAL state. Production defaults to WAL.
+const journalMode = (process.env.SQLITE_JOURNAL_MODE || 'WAL').toUpperCase();
+sqlite.pragma(`journal_mode = ${journalMode}`);
 sqlite.pragma('foreign_keys = ON');
+sqlite.pragma('busy_timeout = 5000');
 
 export const db = drizzle(sqlite, { schema });
 
