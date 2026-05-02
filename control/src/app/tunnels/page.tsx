@@ -1117,31 +1117,33 @@ function Topology({
 
   return (
     <div className="topology-map" aria-label="Tunnel topology">
-      <div className="topology-node source">
-        <span>Client</span>
-        <strong>Public request</strong>
-        <small>{tunnel.domain}</small>
+      <div className="topology-overview">
+        <div className="topology-node source">
+          <span>Client</span>
+          <strong>Public request</strong>
+          <small>{tunnel.domain}</small>
+        </div>
+        <div className="topology-edge" />
+        <div className="topology-gateway-stack">
+          {gatewayNodes.map(gatewayIp => {
+            const gateway = getGateway(gatewayIp.gatewayId)
+            return (
+              <div key={gatewayIp.gatewayId} className="topology-node gateway">
+                <span>{gatewayIp.gatewayName}</span>
+                <strong>{gateway?.publicIp || 'No public IP'}</strong>
+                <small>{gatewayIp.ip}</small>
+              </div>
+            )
+          })}
+        </div>
+        <div className="topology-edge" />
+        <div className="topology-node balancer">
+          <span>Policy</span>
+          <strong>Weighted RR</strong>
+          <small>priority, drain, health</small>
+        </div>
       </div>
-      <div className="topology-edge" />
-      <div className="topology-gateway-stack">
-        {gatewayNodes.map(gatewayIp => {
-          const gateway = getGateway(gatewayIp.gatewayId)
-          return (
-            <div key={gatewayIp.gatewayId} className="topology-node gateway">
-              <span>{gatewayIp.gatewayName}</span>
-              <strong>{gateway?.publicIp || 'No public IP'}</strong>
-              <small>{gatewayIp.ip}</small>
-            </div>
-          )
-        })}
-      </div>
-      <div className="topology-edge" />
-      <div className="topology-node balancer">
-        <span>Policy</span>
-        <strong>Weighted RR</strong>
-        <small>priority, drain, health</small>
-      </div>
-      <div className="topology-edge" />
+      <div className="topology-branch-edge" aria-hidden="true" />
       <div className="topology-backend-stack">
         {backendNodes.map(backend => {
           const backendActive = backend.enabled && !backend.draining

@@ -824,20 +824,26 @@ ul {
 
 .topology-map {
   display: grid;
-  grid-template-columns: minmax(130px, 0.9fr) 32px minmax(150px, 1fr) 32px minmax(120px, 0.75fr) 32px minmax(180px, 1.25fr);
-  align-items: center;
-  gap: 0.35rem;
+  gap: 0.7rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff, #f8fafc);
   padding: 1rem;
 }
 
+.topology-overview {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.9fr) 28px minmax(180px, 1.1fr) 28px minmax(135px, 0.85fr);
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
 .topology-node {
   display: grid;
   gap: 0.2rem;
   min-width: 0;
-  min-height: 5.25rem;
+  min-height: 4.8rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -934,31 +940,33 @@ ul {
   transform: translateY(-50%) rotate(45deg);
 }
 
-@container (max-width: 920px) {
-  .topology-map {
-    grid-template-columns: 1fr;
-  }
+.topology-branch-edge {
+  position: relative;
+  width: 2px;
+  height: 22px;
+  justify-self: center;
+  background: var(--line-strong);
+}
 
-  .topology-map > .topology-edge {
-    width: 2px;
-    height: 24px;
-    min-width: 0;
-    justify-self: center;
-  }
-
-  .topology-map > .topology-edge::after {
-    top: auto;
-    right: 50%;
-    bottom: -1px;
-    transform: translateX(50%) rotate(135deg);
-  }
+.topology-branch-edge::after {
+  position: absolute;
+  right: 50%;
+  bottom: -1px;
+  width: 7px;
+  height: 7px;
+  border-top: 2px solid var(--line-strong);
+  border-right: 2px solid var(--line-strong);
+  content: "";
+  transform: translateX(50%) rotate(135deg);
 }
 
 @container (max-width: 620px) {
+  .topology-overview,
   .topology-backend-route {
     grid-template-columns: 1fr;
   }
 
+  .topology-overview > .topology-edge,
   .topology-backend-route .topology-edge {
     width: 2px;
     height: 24px;
@@ -966,6 +974,7 @@ ul {
     justify-self: center;
   }
 
+  .topology-overview > .topology-edge::after,
   .topology-backend-route .topology-edge::after {
     top: auto;
     right: 50%;
