@@ -226,6 +226,7 @@ export class ControlWebSocketServer {
         .set({
           status: message.status,
           lastSeenAt: new Date(),
+          ...(message.metadata !== undefined && { metadata: message.metadata }),
         })
         .where(eq(gateways.id, client.id));
     } else {
@@ -234,6 +235,7 @@ export class ControlWebSocketServer {
         .set({
           status: message.status,
           lastSeenAt: new Date(),
+          ...(message.metadata !== undefined && { metadata: message.metadata }),
         })
         .where(eq(agents.id, client.id));
     }

@@ -10,7 +10,25 @@ interface Gateway {
   wireguardPublicKey: string | null
   status: string
   lastSeenAt: string | null
+  metadata: GatewayMetadata | null
   createdAt: string
+}
+
+interface GatewayMetadata {
+  httpProxy?: GatewayHTTPProxyRuntime
+}
+
+interface GatewayHTTPProxyRuntime {
+  httpAddress: string
+  httpsAddress: string
+  httpListening: boolean
+  httpsListening: boolean
+  tlsMode: 'disabled' | 'acme' | 'manual' | string
+  acmeEnabled: boolean
+  acmeStaging: boolean
+  acmeEmailConfigured: boolean
+  manualTlsEnabled: boolean
+  routeCount: number
 }
 
 export default function GatewaysPage() {
@@ -105,6 +123,21 @@ export default function GatewaysPage() {
     }
   }
 
+  function runtimeLabel(runtime: GatewayHTTPProxyRuntime | undefined) {
+    if (!runtime) return 'unknown'
+    if (runtime.httpsListening) {
+      if (runtime.tlsMode === 'acme') return runtime.acmeStaging ? 'HTTPS (ACME staging)' : 'HTTPS (ACME)'
+      if (runtime.tlsMode === 'manual') return 'HTTPS (manual)'
+      return 'HTTPS'
+    }
+    if (runtime.httpListening) return 'HTTP only'
+    return 'not listening'
+  }
+
+  function listenerText(address: string, listening: boolean) {
+    return `${address || '-'} ${listening ? 'listening' : 'off'}`
+  }
+
   if (loading) return <div className="loading">Loading...</div>
   if (error) return <div className="error">{error}</div>
 
@@ -144,6 +177,7 @@ export default function GatewaysPage() {
                 <th>Name</th>
                 <th>Status</th>
                 <th>Public IP</th>
+                <th>Runtime</th>
                 <th>API Key</th>
                 <th>Last Seen</th>
                 <th>Actions</th>
@@ -169,6 +203,26 @@ export default function GatewaysPage() {
                       />
                     ) : (
                       <code>{gateway.publicIp || '-'}</code>
+                    )}
+                  </td>
+                  <td style={{ fontSize: '0.875rem' }}>
+                    {gateway.metadata?.httpProxy ? (
+                      <>
+                        <span className={`status ${gateway.metadata.httpProxy.httpListening || gateway.metadata.httpProxy.httpsListening ? 'online' : 'offline'}`}>
+                          {runtimeLabel(gateway.metadata.httpProxy)}
+                        </span>
+                        <div style={{ color: '#666', marginTop: '0.25rem' }}>
+                          HTTP {listenerText(gateway.metadata.httpProxy.httpAddress, gateway.metadata.httpProxy.httpListening)}
+                        </div>
+                        <div style={{ color: '#666' }}>
+                          HTTPS {listenerText(gateway.metadata.httpProxy.httpsAddress, gateway.metadata.httpProxy.httpsListening)}
+                        </div>
+                        <div style={{ color: '#666' }}>
+                          routes {gateway.metadata.httpProxy.routeCount}
+                        </div>
+                      </>
+                    ) : (
+                      <span style={{ color: '#666' }}>Unknown</span>
                     )}
                   </td>
                   <td>
