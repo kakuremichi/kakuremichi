@@ -12,6 +12,7 @@ import { decryptJson } from './crypto';
 import { createDNSProvider } from './providers';
 import type {
   DNSProviderConfig,
+  DNSProvider,
   DNSProviderType,
   DNSRecord,
   DNSRecordType,
@@ -224,16 +225,24 @@ async function syncRow(row: {
 
   for (const desired of desiredRecords) {
     const managed = managedRecords.find((record) => record.gatewayId === desired.gateway.id);
+    const managedRemote = managed
+      ? remoteRecords.find((record) => record.id === managed.providerRecordId)
+      : undefined;
     const remote =
-      managed
-        ? remoteRecords.find((record) => record.id === managed.providerRecordId)
-        : findReusableRemoteRecord(remoteRecords, claimedRemoteIds, desired.record);
+      managedRemote ?? findReusableRemoteRecord(remoteRecords, claimedRemoteIds, desired.record);
 
-    if (remote) claimedRemoteIds.add(remote.id);
-
-    const syncedRecord = remote
-      ? await provider.updateRecord(row.zone.providerZoneId, remote.id, desired.record)
-      : await provider.createRecord(row.zone.providerZoneId, desired.record);
+    let syncedRecord: DNSRecord;
+    if (remote) {
+      claimedRemoteIds.add(remote.id);
+      syncedRecord = await provider.updateRecord(row.zone.providerZoneId, remote.id, desired.record);
+    } else {
+      syncedRecord = await createOrAdoptRecord(
+        provider,
+        row.zone.providerZoneId,
+        desired.record,
+        claimedRemoteIds
+      );
+    }
 
     if (managed) {
       activeManagedIds.add(managed.id);
@@ -300,6 +309,32 @@ function findReusableRemoteRecord(
       record.type === desired.type &&
       record.content === desired.content
   );
+}
+
+async function createOrAdoptRecord(
+  provider: DNSProvider,
+  zoneId: string,
+  desired: DesiredDNSRecord,
+  claimedRemoteIds: Set<string>
+): Promise<DNSRecord> {
+  try {
+    const created = await provider.createRecord(zoneId, desired);
+    claimedRemoteIds.add(created.id);
+    return created;
+  } catch (error) {
+    if (!isDuplicateRecordError(error)) throw error;
+
+    const refreshedRecords = await provider.listRecords(zoneId, desired.name, desired.type);
+    const reusable = findReusableRemoteRecord(refreshedRecords, claimedRemoteIds, desired);
+    if (!reusable) throw error;
+
+    claimedRemoteIds.add(reusable.id);
+    return provider.updateRecord(zoneId, reusable.id, desired);
+  }
+}
+
+function isDuplicateRecordError(error: unknown): boolean {
+  return error instanceof Error && error.message.toLowerCase().includes('identical record already exists');
 }
 
 async function updateManagedRecord(id: string, gatewayId: string, record: DNSRecord) {
