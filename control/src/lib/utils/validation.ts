@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TUNNEL_TLS_MODES } from '@/lib/certificates/types';
 
 /**
  * Domain validation schema
@@ -82,6 +83,13 @@ export const updateGatewaySchema = z.object({
   region: z.string().max(32).nullable().optional(),
 }).strict();
 
+export const tunnelTlsConfigSchema = z.object({
+  mode: z.enum(TUNNEL_TLS_MODES).optional().default('disabled'),
+  dnsZoneId: z.string().uuid('Invalid DNS zone ID').optional(),
+  certificateId: z.string().uuid('Invalid certificate ID').nullable().optional(),
+  forceHttps: z.boolean().optional().default(true),
+}).strict();
+
 /**
  * Tunnel creation validation schema
  */
@@ -104,6 +112,7 @@ export const createTunnelSchema = z.object({
       proxied: z.boolean().optional().default(false),
     })
     .optional(),
+  tls: tunnelTlsConfigSchema.optional(),
 }).strict();
 
 /**
@@ -117,4 +126,5 @@ export const updateTunnelSchema = z.object({
   // Exit Node (Outbound Proxy) settings
   httpProxyEnabled: z.boolean().optional(),
   socksProxyEnabled: z.boolean().optional(),
+  tls: tunnelTlsConfigSchema.optional(),
 }).strict();

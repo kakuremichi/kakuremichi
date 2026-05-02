@@ -61,6 +61,11 @@ for ACME DNS-01 issuance. This keeps certificate issuance independent from a
 specific DNS provider; switching providers means importing the new zone and
 updating the certificate's `dnsZoneId` before the next renewal.
 
+`POST /api/certificates/{id}/issue` runs ACME DNS-01 issuance. Control uses
+`CONTROL_ACME_EMAIL` or `ACME_EMAIL` for the ACME account and stores the ACME
+account key, certificate chain, and certificate private key encrypted at rest.
+Set `CONTROL_ACME_STAGING=true` for staging certificates.
+
 ## Examples
 
 Create an Agent:
@@ -90,6 +95,15 @@ curl -X POST http://localhost:3000/api/tunnels \
   -d '{"domain":"app.example.com","agentId":"AGENT_UUID","target":"localhost:8080"}'
 ```
 
+Create a Tunnel with Control-managed TLS:
+
+```bash
+curl -X POST http://localhost:3000/api/tunnels \
+  -H "Authorization: Bearer kmt_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"domain":"app.example.com","agentId":"AGENT_UUID","target":"localhost:8080","tls":{"mode":"auto","dnsZoneId":"DNS_ZONE_UUID","forceHttps":true}}'
+```
+
 Create a certificate inventory record:
 
 ```bash
@@ -97,4 +111,11 @@ curl -X POST http://localhost:3000/api/certificates \
   -H "Authorization: Bearer kmt_xxx" \
   -H "Content-Type: application/json" \
   -d '{"domain":"app.example.com","dnsZoneId":"DNS_ZONE_UUID"}'
+```
+
+Issue or renew a certificate:
+
+```bash
+curl -X POST http://localhost:3000/api/certificates/CERTIFICATE_UUID/issue \
+  -H "Authorization: Bearer kmt_xxx"
 ```

@@ -12,6 +12,7 @@ const navItems = [
   { href: '/gateways', label: 'Gateways', description: 'Edge nodes' },
   { href: '/tunnels', label: 'Tunnels', description: 'Routes' },
   { href: '/settings/dns', label: 'DNS', description: 'Sync' },
+  { href: '/settings/certificates', label: 'Certificates', description: 'TLS' },
   { href: '/settings/tokens', label: 'Tokens', description: 'API access' },
 ]
 

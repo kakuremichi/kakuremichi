@@ -60,6 +60,14 @@ const tunnelSchema = {
     agentIp: { type: ['string', 'null'] },
     httpProxyEnabled: { type: 'boolean' },
     socksProxyEnabled: { type: 'boolean' },
+    tls: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['disabled', 'auto', 'gateway_acme'] },
+        forceHttps: { type: 'boolean' },
+        certificate: { anyOf: [{ $ref: '#/components/schemas/Certificate' }, { type: 'null' }] },
+      },
+    },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
   },
@@ -181,6 +189,16 @@ const openApiDocument = {
               },
               ttl: { type: 'integer', minimum: 60, maximum: 86400, default: 60 },
               proxied: { type: 'boolean', default: false },
+            },
+          },
+          tls: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              mode: { type: 'string', enum: ['disabled', 'auto', 'gateway_acme'], default: 'disabled' },
+              dnsZoneId: { type: 'string', format: 'uuid' },
+              certificateId: { type: ['string', 'null'], format: 'uuid' },
+              forceHttps: { type: 'boolean', default: true },
             },
           },
         },
@@ -468,6 +486,14 @@ const openApiDocument = {
         summary: 'Delete a certificate inventory record',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: { '200': { description: 'Certificate deleted' } },
+      },
+    },
+    '/api/certificates/{id}/issue': {
+      post: {
+        summary: 'Issue or renew a managed certificate',
+        description: 'Runs ACME DNS-01 using the certificate DNS zone and stores encrypted PEM material.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Certificate issued without private key material' } },
       },
     },
   },

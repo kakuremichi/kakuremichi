@@ -37,6 +37,20 @@ interface Tunnel {
       type: string
     }
   } | null
+  tls: {
+    mode: string
+    forceHttps: boolean
+    certificate: {
+      id: string
+      domain: string
+      status: string
+      notAfter: string | null
+      renewAfter: string | null
+      lastIssuedAt: string | null
+      lastError: string | null
+      dnsZoneId: string | null
+    } | null
+  }
   createdAt: string
   updatedAt: string
 }
@@ -72,6 +86,9 @@ export default function TunnelsPage() {
     dnsStrategy: 'all_gateways',
     dnsTtl: '60',
     dnsProxied: false,
+    tlsEnabled: false,
+    tlsDnsZoneId: '',
+    tlsForceHttps: true,
   })
 
   useEffect(() => {
@@ -130,6 +147,18 @@ export default function TunnelsPage() {
           proxied: formData.dnsProxied,
         }
       }
+      if (formData.tlsEnabled) {
+        const dnsZoneId = formData.tlsDnsZoneId || formData.dnsZoneId
+        if (!dnsZoneId) {
+          alert('Please select a DNS zone for TLS')
+          return
+        }
+        body.tls = {
+          mode: 'auto',
+          dnsZoneId,
+          forceHttps: formData.tlsForceHttps,
+        }
+      }
 
       const res = await fetch('/api/tunnels', {
         method: 'POST',
@@ -150,6 +179,9 @@ export default function TunnelsPage() {
         dnsStrategy: 'all_gateways',
         dnsTtl: '60',
         dnsProxied: false,
+        tlsEnabled: false,
+        tlsDnsZoneId: '',
+        tlsForceHttps: true,
       })
       setShowNewForm(false)
       fetchData()
@@ -205,9 +237,78 @@ export default function TunnelsPage() {
     }
   }
 
+  async function enableTls(tunnel: Tunnel) {
+    const zoneId = tunnel.dnsSync?.zone.id || zones.find(zone => zone.enabled)?.id
+    if (!zoneId) {
+      alert('Import a DNS zone before enabling Control-managed TLS')
+      return
+    }
+    try {
+      const res = await fetch(`/api/tunnels/${tunnel.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tls: {
+            mode: 'auto',
+            dnsZoneId: zoneId,
+            forceHttps: true,
+          },
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to enable TLS')
+      }
+      fetchData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to enable TLS')
+    }
+  }
+
+  async function disableTls(tunnel: Tunnel) {
+    try {
+      const res = await fetch(`/api/tunnels/${tunnel.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tls: {
+            mode: 'disabled',
+            forceHttps: false,
+          },
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to disable TLS')
+      }
+      fetchData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to disable TLS')
+    }
+  }
+
+  async function issueCertificate(certificateId: string) {
+    try {
+      const res = await fetch(`/api/certificates/${certificateId}/issue`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to issue certificate')
+      }
+      fetchData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to issue certificate')
+    }
+  }
+
   function getAgentName(agentId: string) {
     const agent = agents.find(a => a.id === agentId)
     return agent ? agent.name : 'Unknown'
+  }
+
+  function certificateStatusClass(status?: string) {
+    if (status === 'ready') return 'online'
+    if (status === 'pending' || status === 'issuing' || status === 'renewal_due') return 'warning'
+    return 'offline'
   }
 
   if (loading) return <div className="loading">Loading...</div>
@@ -335,6 +436,43 @@ export default function TunnelsPage() {
               </div>
             )}
           </div>
+          <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '0.875rem', marginBottom: '0.5rem', color: '#666' }}>TLS</h3>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: '1rem' }}>
+              <input
+                type="checkbox"
+                checked={formData.tlsEnabled}
+                onChange={(e) => setFormData({ ...formData, tlsEnabled: e.target.checked })}
+              />
+              <span>Issue and serve a Control-managed HTTPS certificate</span>
+            </label>
+            {formData.tlsEnabled && (
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label>DNS-01 Zone</label>
+                  <select
+                    value={formData.tlsDnsZoneId || formData.dnsZoneId}
+                    onChange={(e) => setFormData({ ...formData, tlsDnsZoneId: e.target.value })}
+                  >
+                    <option value="">Select a zone</option>
+                    {zones.filter(zone => zone.enabled).map((zone) => (
+                      <option key={zone.id} value={zone.id}>
+                        {zone.name} ({zone.providerName})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.85rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={formData.tlsForceHttps}
+                    onChange={(e) => setFormData({ ...formData, tlsForceHttps: e.target.checked })}
+                  />
+                  <span>Force HTTPS</span>
+                </label>
+              </div>
+            )}
+          </div>
           <button onClick={createTunnel}>Create Tunnel</button>
         </div>
       )}
@@ -353,6 +491,7 @@ export default function TunnelsPage() {
                 <th>Network</th>
                 <th>Exit Node</th>
                 <th>DNS</th>
+                <th>TLS</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -436,6 +575,37 @@ export default function TunnelsPage() {
                       <span style={{ color: '#999' }}>Manual</span>
                     )}
                   </td>
+                  <td style={{ fontSize: '0.75rem' }}>
+                    {tunnel.tls?.mode === 'auto' && tunnel.tls.certificate ? (
+                      <div>
+                        <div>
+                          <span className={`status ${certificateStatusClass(tunnel.tls.certificate.status)}`}>
+                            {tunnel.tls.certificate.status}
+                          </span>
+                        </div>
+                        <div style={{ color: '#666', marginTop: '0.25rem' }}>
+                          {tunnel.tls.certificate.domain}
+                        </div>
+                        <div style={{ color: '#666' }}>
+                          {tunnel.tls.certificate.notAfter
+                            ? `Expires: ${new Date(tunnel.tls.certificate.notAfter).toLocaleDateString()}`
+                            : 'Not issued'}
+                        </div>
+                        <div style={{ color: '#666' }}>
+                          {tunnel.tls.forceHttps ? 'Force HTTPS' : 'HTTPS optional'}
+                        </div>
+                        {tunnel.tls.certificate.lastError && (
+                          <div style={{ color: '#b91c1c', marginTop: '0.25rem' }}>
+                            {tunnel.tls.certificate.lastError}
+                          </div>
+                        )}
+                      </div>
+                    ) : tunnel.tls?.mode === 'gateway_acme' ? (
+                      <span className="status warning">Gateway ACME</span>
+                    ) : (
+                      <span style={{ color: '#999' }}>Disabled</span>
+                    )}
+                  </td>
                   <td>
                     <span className={`status ${tunnel.enabled ? 'online' : 'offline'}`}>
                       {tunnel.enabled ? 'Enabled' : 'Disabled'}
@@ -455,6 +625,29 @@ export default function TunnelsPage() {
                           onClick={() => syncDns(tunnel.id)}
                         >
                           Sync DNS
+                        </button>
+                      )}
+                      {tunnel.tls?.mode === 'auto' && tunnel.tls.certificate ? (
+                        <>
+                          <button
+                            className="secondary"
+                            onClick={() => issueCertificate(tunnel.tls.certificate!.id)}
+                          >
+                            {tunnel.tls.certificate.status === 'ready' ? 'Renew TLS' : 'Issue TLS'}
+                          </button>
+                          <button
+                            className="secondary"
+                            onClick={() => disableTls(tunnel)}
+                          >
+                            Disable TLS
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="secondary"
+                          onClick={() => enableTls(tunnel)}
+                        >
+                          Enable TLS
                         </button>
                       )}
                       <button

@@ -453,6 +453,11 @@ tbody tr:last-child td {
   color: var(--danger);
 }
 
+.status.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
 button {
   display: inline-flex;
   align-items: center;

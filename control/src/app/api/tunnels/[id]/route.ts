@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { db, tunnels } from '@/lib/db';
+import { db, tunnels, tunnelTlsSettings, certificates } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
 import { deleteTunnelDnsRecords, syncTunnelDns } from '@/lib/dns/sync';
+import { configureTunnelTls } from '@/lib/certificates/tunnel-tls';
 import { updateTunnelSchema } from '@/lib/utils/validation';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
@@ -19,7 +20,8 @@ export async function GET(
       if (!foundTunnel) {
         return apiError('not_found', 'Tunnel not found', 404);
       }
-      return apiJson(foundTunnel);
+      const tls = await getTunnelTls(id);
+      return apiJson({ ...foundTunnel, tls });
     } catch (error) {
       console.error('Failed to fetch tunnel:', error);
       return apiRouteError(error, 'Failed to fetch tunnel');
@@ -36,16 +38,20 @@ export async function PATCH(
       const { id } = await params;
       const body = await readJsonBody(request);
       const validatedData = updateTunnelSchema.parse(body);
+      const { tls, ...tunnelData } = validatedData;
 
       const updated = await db
         .update(tunnels)
-        .set({ ...validatedData, updatedAt: new Date() })
+        .set({ ...tunnelData, updatedAt: new Date() })
         .where(eq(tunnels.id, id))
         .returning();
 
       const updatedTunnel = updated[0];
       if (!updatedTunnel) {
         return apiError('not_found', 'Tunnel not found', 404);
+      }
+      if (tls) {
+        await configureTunnelTls(updatedTunnel.id, tls);
       }
 
       try {
@@ -66,12 +72,42 @@ export async function PATCH(
         console.error('Failed to broadcast tunnel update config:', err);
       }
 
-      return apiJson(updatedTunnel);
+      return apiJson({ ...updatedTunnel, tls: await getTunnelTls(updatedTunnel.id) });
     } catch (error) {
       console.error('Failed to update tunnel:', error);
       return apiRouteError(error, 'Failed to update tunnel');
     }
   });
+}
+
+async function getTunnelTls(tunnelId: string) {
+  const [row] = await db
+    .select({
+      tunnelId: tunnelTlsSettings.tunnelId,
+      mode: tunnelTlsSettings.mode,
+      forceHttps: tunnelTlsSettings.forceHttps,
+      certificate: {
+        id: certificates.id,
+        domain: certificates.domain,
+        status: certificates.status,
+        notAfter: certificates.notAfter,
+        renewAfter: certificates.renewAfter,
+        lastIssuedAt: certificates.lastIssuedAt,
+        lastError: certificates.lastError,
+        dnsZoneId: certificates.dnsZoneId,
+      },
+    })
+    .from(tunnelTlsSettings)
+    .leftJoin(certificates, eq(tunnelTlsSettings.certificateId, certificates.id))
+    .where(eq(tunnelTlsSettings.tunnelId, tunnelId))
+    .limit(1);
+
+  return row ?? {
+    tunnelId,
+    mode: 'disabled',
+    forceHttps: false,
+    certificate: null,
+  };
 }
 
 export async function DELETE(

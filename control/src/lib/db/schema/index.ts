@@ -6,3 +6,5 @@ export * from './users';
 export * from './api-tokens';
 export * from './dns';
 export * from './certificates';
+export * from './tunnel-tls-settings';
+export * from './acme-accounts';

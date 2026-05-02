@@ -8,10 +8,13 @@ import {
   dnsProviders,
   dnsSyncSettings,
   dnsZones,
+  certificates,
+  tunnelTlsSettings,
 } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
 import { createTunnelSchema, allocateTunnelSubnetSync, allocateGatewayIpsForTunnel } from '@/lib/utils';
 import { syncTunnelDns } from '@/lib/dns/sync';
+import { configureTunnelTls } from '@/lib/certificates/tunnel-tls';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
 import { apiCreated, apiError, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
@@ -90,10 +93,37 @@ export async function GET(request: NextRequest) {
 
       const dnsSyncByTunnel = new Map(allDnsSettings.map((setting) => [setting.tunnelId, setting]));
 
+      const allTlsSettings = await db
+        .select({
+          tunnelId: tunnelTlsSettings.tunnelId,
+          mode: tunnelTlsSettings.mode,
+          forceHttps: tunnelTlsSettings.forceHttps,
+          certificate: {
+            id: certificates.id,
+            domain: certificates.domain,
+            status: certificates.status,
+            notAfter: certificates.notAfter,
+            renewAfter: certificates.renewAfter,
+            lastIssuedAt: certificates.lastIssuedAt,
+            lastError: certificates.lastError,
+            dnsZoneId: certificates.dnsZoneId,
+          },
+        })
+        .from(tunnelTlsSettings)
+        .leftJoin(certificates, eq(tunnelTlsSettings.certificateId, certificates.id));
+
+      const tlsByTunnel = new Map(allTlsSettings.map((setting) => [setting.tunnelId, setting]));
+
       const tunnelsWithGatewayIps = allTunnels.map(tunnel => ({
         ...tunnel,
         gatewayIps: gatewayIpsByTunnel.get(tunnel.id) || [],
         dnsSync: dnsSyncByTunnel.get(tunnel.id) || null,
+        tls: tlsByTunnel.get(tunnel.id) || {
+          tunnelId: tunnel.id,
+          mode: 'disabled',
+          forceHttps: false,
+          certificate: null,
+        },
       }));
 
       return apiJson(tunnelsWithGatewayIps);
@@ -172,6 +202,9 @@ export async function POST(request: NextRequest) {
       }
       const createdTunnel = result.tunnel;
       if (createdTunnel) {
+        if (validatedData.tls) {
+          await configureTunnelTls(createdTunnel.id, validatedData.tls);
+        }
         await allocateGatewayIpsForTunnel(createdTunnel.id, result.subnet);
         if (validatedData.dnsSync?.enabled) {
           try {

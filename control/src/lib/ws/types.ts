@@ -133,7 +133,18 @@ export interface GatewayConfig {
     subnet: string;
     virtualIp: string;
   }>;
-  tunnels: Array<Tunnel & { agentId: string }>;
+  tunnels: Array<Tunnel & {
+    agentId: string;
+    tlsMode: 'disabled' | 'auto' | 'gateway_acme';
+    certificateId: string | null;
+    forceHttps: boolean;
+  }>;
+  certificates: Array<{
+    id: string;
+    domain: string;
+    certificatePem: string;
+    privateKeyPem: string;
+  }>;
   // Exit Node proxy configuration
   proxyConfig: {
     httpProxyPort: number;

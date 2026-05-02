@@ -1,8 +1,17 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server as HTTPServer, IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
-import { db, agents, gateways, tunnels, tunnelGatewayIps } from '../db';
+import {
+  db,
+  agents,
+  gateways,
+  tunnels,
+  tunnelGatewayIps,
+  certificates,
+  tunnelTlsSettings,
+} from '../db';
 import { eq } from 'drizzle-orm';
+import { decryptCertificateBundle } from '../certificates/acme';
 import type {
   WSMessage,
   AuthMessage,
@@ -411,6 +420,8 @@ export class ControlWebSocketServer {
 
     // Get all tunnels
     const allTunnels = await db.select().from(tunnels);
+    const allTlsSettings = await db.select().from(tunnelTlsSettings);
+    const tlsByTunnel = new Map(allTlsSettings.map((setting) => [setting.tunnelId, setting]));
 
     // Get this gateway's IPs for all tunnels
     const gatewayIps = await db
@@ -420,6 +431,30 @@ export class ControlWebSocketServer {
 
     // Create a map of tunnelId -> this gateway's IP
     const gatewayIpByTunnel = new Map(gatewayIps.map(ip => [ip.tunnelId, ip.ip]));
+
+    const usedCertificateIds = new Set(
+      allTlsSettings
+        .filter((setting) => setting.mode === 'auto' && setting.certificateId)
+        .map((setting) => setting.certificateId!)
+    );
+    const certificateRows = usedCertificateIds.size > 0
+      ? await db.select().from(certificates)
+      : [];
+    const certificateList = [];
+    for (const certificate of certificateRows) {
+      if (!usedCertificateIds.has(certificate.id) || certificate.status !== 'ready') continue;
+      try {
+        const bundle = decryptCertificateBundle(certificate);
+        if (!bundle) continue;
+        certificateList.push({
+          id: certificate.id,
+          domain: certificate.domain,
+          ...bundle,
+        });
+      } catch (error) {
+        console.error(`Failed to decrypt certificate ${certificate.id}:`, error);
+      }
+    }
 
     // Build agent list with WireGuard info (only online agents)
     // Each agent's AllowedIPs should be the agentIPs of its tunnels
@@ -442,6 +477,7 @@ export class ControlWebSocketServer {
 
     // Build tunnel list with network info (including this gateway's IP)
     const tunnelList = allTunnels.map((tunnel) => ({
+      ...tunnel,
       id: tunnel.id,
       domain: tunnel.domain,
       agentId: tunnel.agentId,
@@ -453,11 +489,15 @@ export class ControlWebSocketServer {
       // Exit Node (Outbound Proxy) settings
       httpProxyEnabled: tunnel.httpProxyEnabled,
       socksProxyEnabled: tunnel.socksProxyEnabled,
+      tlsMode: tlsByTunnel.get(tunnel.id)?.mode ?? 'disabled',
+      certificateId: tlsByTunnel.get(tunnel.id)?.certificateId ?? null,
+      forceHttps: tlsByTunnel.get(tunnel.id)?.forceHttps ?? false,
     }));
 
     const config = {
       agents: agentList,
       tunnels: tunnelList,
+      certificates: certificateList,
       // Exit Node proxy configuration
       proxyConfig: {
         httpProxyPort: PROXY_PORTS.HTTP,

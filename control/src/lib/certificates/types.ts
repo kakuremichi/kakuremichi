@@ -13,3 +13,6 @@ export const CERTIFICATE_STATUSES = [
   'disabled',
 ] as const;
 export type CertificateStatus = (typeof CERTIFICATE_STATUSES)[number];
+
+export const TUNNEL_TLS_MODES = ['disabled', 'auto', 'gateway_acme'] as const;
+export type TunnelTlsMode = (typeof TUNNEL_TLS_MODES)[number];
