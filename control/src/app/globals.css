@@ -1010,9 +1010,46 @@ ul {
   padding-top: 1rem;
 }
 
+@media (max-width: 1180px) {
+  .tunnel-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .tunnel-list-panel {
+    position: static;
+    max-height: none;
+  }
+
+  .topology-map {
+    grid-template-columns: 1fr;
+  }
+
+  .topology-edge {
+    width: 2px;
+    height: 24px;
+    min-width: 0;
+    justify-self: center;
+  }
+
+  .topology-edge::after {
+    top: auto;
+    right: 50%;
+    bottom: -1px;
+    transform: translateX(50%) rotate(135deg);
+  }
+}
+
 @media (max-width: 980px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar,
+  .workspace,
+  .topbar,
+  .app-content {
+    width: 100%;
+    min-width: 0;
   }
 
   .sidebar {
@@ -1078,33 +1115,6 @@ ul {
 
   .tunnel-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .tunnel-workbench {
-    grid-template-columns: 1fr;
-  }
-
-  .tunnel-list-panel {
-    position: static;
-    max-height: none;
-  }
-
-  .topology-map {
-    grid-template-columns: 1fr;
-  }
-
-  .topology-edge {
-    width: 2px;
-    height: 24px;
-    min-width: 0;
-    justify-self: center;
-  }
-
-  .topology-edge::after {
-    top: auto;
-    right: 50%;
-    bottom: -1px;
-    transform: translateX(50%) rotate(135deg);
   }
 
   .detail-grid,
