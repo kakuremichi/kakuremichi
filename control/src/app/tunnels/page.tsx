@@ -1143,13 +1143,26 @@ function Topology({
       </div>
       <div className="topology-edge" />
       <div className="topology-backend-stack">
-        {backendNodes.map(backend => (
-          <div key={backend.id} className={backend.enabled && !backend.draining ? 'topology-node agent' : 'topology-node agent muted'}>
-            <span>{getBackendAgentName(backend)} {'->'} {backend.target}</span>
-            <strong>{backend.agentIp}</strong>
-            <small>w{backend.weight} / p{backend.priority} / {backend.draining ? 'drain' : getBackendAgentStatus(backend)}</small>
-          </div>
-        ))}
+        {backendNodes.map(backend => {
+          const backendActive = backend.enabled && !backend.draining
+          const backendState = backend.draining ? 'drain' : getBackendAgentStatus(backend)
+
+          return (
+            <div key={backend.id} className="topology-backend-route">
+              <div className={backendActive ? 'topology-node agent' : 'topology-node agent muted'}>
+                <span>{getBackendAgentName(backend)}</span>
+                <strong>{backend.agentIp}</strong>
+                <small>w{backend.weight} / p{backend.priority} / {backendState}</small>
+              </div>
+              <div className="topology-edge topology-edge-inline" aria-hidden="true" />
+              <div className={backendActive ? 'topology-node target' : 'topology-node target muted'}>
+                <span>Service</span>
+                <strong>{backend.target}</strong>
+                <small>origin target</small>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
