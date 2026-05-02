@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { importDnsZones } from '@/lib/dns/sync';
 import { withAuth } from '@/lib/auth';
+import { apiError, apiJson } from '@/lib/api/response';
 
 export async function POST(
   request: NextRequest,
@@ -10,12 +11,13 @@ export async function POST(
     try {
       const { id } = await params;
       const zones = await importDnsZones(id);
-      return NextResponse.json({ zones });
+      return apiJson({ zones });
     } catch (err) {
       console.error('Failed to import DNS zones:', err);
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : 'Failed to import DNS zones' },
-        { status: 500 }
+      return apiError(
+        'dns_provider_error',
+        err instanceof Error ? err.message : 'Failed to import DNS zones',
+        502
       );
     }
   });

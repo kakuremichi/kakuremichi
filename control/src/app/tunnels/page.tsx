@@ -240,7 +240,7 @@ export default function TunnelsPage() {
               type="text"
               value={formData.target}
               onChange={(e) => setFormData({ ...formData, target: e.target.value })}
-              placeholder="http://localhost:8080"
+              placeholder="localhost:8080"
             />
           </div>
           <div className="form-group">

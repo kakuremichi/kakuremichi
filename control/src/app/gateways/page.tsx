@@ -5,13 +5,18 @@ import { useEffect, useState } from 'react'
 interface Gateway {
   id: string
   name: string
-  apiKey: string
+  apiKeyPrefix: string | null
   publicIp: string | null
   wireguardPublicKey: string | null
   status: string
   lastSeenAt: string | null
   metadata: GatewayMetadata | null
   createdAt: string
+}
+
+interface CreatedGatewayCredential {
+  name: string
+  apiKey: string
 }
 
 interface GatewayMetadata {
@@ -39,6 +44,7 @@ export default function GatewaysPage() {
   const [newGatewayName, setNewGatewayName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ publicIp: '' })
+  const [createdCredential, setCreatedCredential] = useState<CreatedGatewayCredential | null>(null)
 
   useEffect(() => {
     fetchGateways()
@@ -71,7 +77,9 @@ export default function GatewaysPage() {
       })
 
       if (!res.ok) throw new Error('Failed to create gateway')
+      const created = await res.json()
 
+      setCreatedCredential({ name: created.name, apiKey: created.apiKey })
       setNewGatewayName('')
       setShowNewForm(false)
       fetchGateways()
@@ -150,6 +158,22 @@ export default function GatewaysPage() {
         </button>
       </div>
 
+      {createdCredential && (
+        <div className="card" style={{ marginBottom: '2rem', borderLeft: '4px solid #f59e0b' }}>
+          <h2>New Gateway API Key</h2>
+          <p style={{ color: '#92400e', marginBottom: '1rem' }}>
+            Save this key now. It is shown only after creation.
+          </p>
+          <p style={{ color: '#666', marginBottom: '0.5rem' }}>{createdCredential.name}</p>
+          <code style={{ display: 'block', padding: '0.75rem', background: '#f3f4f6', wordBreak: 'break-all' }}>
+            {createdCredential.apiKey}
+          </code>
+          <button className="secondary" style={{ marginTop: '1rem' }} onClick={() => setCreatedCredential(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {showNewForm && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2>Create New Gateway</h2>
@@ -227,7 +251,7 @@ export default function GatewaysPage() {
                   </td>
                   <td>
                     <code style={{ fontSize: '0.75rem' }}>
-                      {gateway.apiKey}
+                      {gateway.apiKeyPrefix ? `${gateway.apiKeyPrefix}...` : '-'}
                     </code>
                   </td>
                   <td style={{ fontSize: '0.875rem', color: '#666' }}>

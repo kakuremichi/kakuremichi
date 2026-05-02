@@ -1,0 +1,389 @@
+import { apiJson } from '@/lib/api/response';
+
+const errorSchema = {
+  type: 'object',
+  required: ['error', 'code'],
+  properties: {
+    error: { type: 'string' },
+    code: { type: 'string' },
+    details: {},
+  },
+};
+
+const agentSchema = {
+  type: 'object',
+  required: ['id', 'name', 'apiKeyPrefix', 'status', 'createdAt', 'updatedAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: 'string' },
+    apiKeyPrefix: { type: ['string', 'null'] },
+    wireguardPublicKey: { type: ['string', 'null'] },
+    virtualIp: { type: ['string', 'null'], deprecated: true },
+    subnet: { type: ['string', 'null'], deprecated: true },
+    status: { type: 'string', enum: ['online', 'offline', 'error'] },
+    lastSeenAt: { type: ['string', 'null'], format: 'date-time' },
+    metadata: { type: ['object', 'null'] },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
+const gatewaySchema = {
+  type: 'object',
+  required: ['id', 'name', 'apiKeyPrefix', 'status', 'createdAt', 'updatedAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    name: { type: 'string' },
+    apiKeyPrefix: { type: ['string', 'null'] },
+    publicIp: { type: ['string', 'null'] },
+    wireguardPublicKey: { type: ['string', 'null'] },
+    region: { type: ['string', 'null'] },
+    status: { type: 'string', enum: ['online', 'offline', 'error'] },
+    lastSeenAt: { type: ['string', 'null'], format: 'date-time' },
+    metadata: { type: ['object', 'null'] },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
+const tunnelSchema = {
+  type: 'object',
+  required: ['id', 'domain', 'agentId', 'target', 'enabled', 'createdAt', 'updatedAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    domain: { type: 'string' },
+    agentId: { type: 'string', format: 'uuid' },
+    target: { type: 'string', description: 'Origin target in host:port format.' },
+    enabled: { type: 'boolean' },
+    description: { type: ['string', 'null'] },
+    subnet: { type: ['string', 'null'] },
+    agentIp: { type: ['string', 'null'] },
+    httpProxyEnabled: { type: 'boolean' },
+    socksProxyEnabled: { type: 'boolean' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
+const openApiDocument = {
+  openapi: '3.1.0',
+  info: {
+    title: 'kakuremichi Control API',
+    version: '0.1.0',
+    description:
+      'External API for managing kakuremichi agents, gateways, tunnels, API tokens, and DNS sync.',
+  },
+  servers: [{ url: '/' }],
+  security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+  components: {
+    responses: {
+      Unauthorized: {
+        description: 'Authentication required',
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+      },
+      Forbidden: {
+        description: 'Insufficient scope or role',
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+      },
+      NotFound: {
+        description: 'Resource not found',
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+      },
+    },
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'kmt token',
+      },
+      cookieAuth: {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'kakuremichi_session',
+      },
+    },
+    schemas: {
+      Error: errorSchema,
+      Agent: agentSchema,
+      Gateway: gatewaySchema,
+      Tunnel: tunnelSchema,
+      AgentCreate: {
+        type: 'object',
+        required: ['name'],
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string', pattern: '^[a-zA-Z0-9_-]+$' },
+          wireguardPublicKey: { type: 'string' },
+        },
+      },
+      GatewayCreate: {
+        type: 'object',
+        required: ['name'],
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string', pattern: '^[a-zA-Z0-9_-]+$' },
+          publicIp: { type: 'string', format: 'ipv4' },
+          wireguardPublicKey: { type: 'string' },
+          region: { type: 'string' },
+        },
+      },
+      TunnelCreate: {
+        type: 'object',
+        required: ['domain', 'agentId', 'target'],
+        additionalProperties: false,
+        properties: {
+          domain: { type: 'string' },
+          agentId: { type: 'string', format: 'uuid' },
+          target: { type: 'string', description: 'host:port, for example localhost:8080' },
+          description: { type: 'string' },
+          httpProxyEnabled: { type: 'boolean', default: false },
+          socksProxyEnabled: { type: 'boolean', default: false },
+          dnsSync: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              enabled: { type: 'boolean', default: true },
+              zoneId: { type: 'string', format: 'uuid' },
+              recordType: { type: 'string', enum: ['A'], default: 'A' },
+              strategy: {
+                type: 'string',
+                enum: ['all_gateways', 'online_gateways'],
+                default: 'all_gateways',
+              },
+              ttl: { type: 'integer', minimum: 60, maximum: 86400, default: 60 },
+              proxied: { type: 'boolean', default: false },
+            },
+          },
+        },
+      },
+      ApiTokenCreate: {
+        type: 'object',
+        required: ['name', 'scopes'],
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' },
+          scopes: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string', enum: ['read', 'write', 'admin'] },
+          },
+          expiresInDays: { type: 'integer', minimum: 1, maximum: 3650 },
+        },
+      },
+      Ok: {
+        type: 'object',
+        required: ['ok'],
+        properties: { ok: { type: 'boolean', const: true } },
+      },
+    },
+  },
+  paths: {
+    '/api/auth/me': {
+      get: {
+        summary: 'Get current API identity',
+        responses: {
+          '200': { description: 'Current authenticated identity' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/api/tokens': {
+      get: {
+        summary: 'List API tokens for the current user',
+        responses: { '200': { description: 'Token list' } },
+      },
+      post: {
+        summary: 'Create an API token',
+        description: 'The plaintext token is returned only in this response.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ApiTokenCreate' } } },
+        },
+        responses: { '201': { description: 'Created token with one-time plaintext value' } },
+      },
+    },
+    '/api/tokens/{id}': {
+      delete: {
+        summary: 'Revoke an API token',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Token revoked' } },
+      },
+    },
+    '/api/agents': {
+      get: {
+        summary: 'List agents',
+        responses: {
+          '200': {
+            description: 'Agent list',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/Agent' } },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: 'Create an agent',
+        description: 'The Agent API key is returned only in this creation response.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/AgentCreate' } } },
+        },
+        responses: { '201': { description: 'Created agent with one-time apiKey' } },
+      },
+    },
+    '/api/agents/{id}': {
+      get: {
+        summary: 'Get an agent',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Agent', content: { 'application/json': { schema: { $ref: '#/components/schemas/Agent' } } } } },
+      },
+      patch: {
+        summary: 'Update an agent management record',
+        description: 'Runtime status fields are managed by WebSocket clients, not this endpoint.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { name: { type: 'string', pattern: '^[a-zA-Z0-9_-]+$' } },
+              },
+            },
+          },
+        },
+        responses: { '200': { description: 'Updated agent' } },
+      },
+      delete: {
+        summary: 'Delete an agent',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Agent deleted', content: { 'application/json': { schema: { $ref: '#/components/schemas/Ok' } } } } },
+      },
+    },
+    '/api/gateways': {
+      get: {
+        summary: 'List gateways',
+        responses: {
+          '200': {
+            description: 'Gateway list',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/Gateway' } },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: 'Create a gateway',
+        description: 'The Gateway API key is returned only in this creation response.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/GatewayCreate' } } },
+        },
+        responses: { '201': { description: 'Created gateway with one-time apiKey' } },
+      },
+    },
+    '/api/gateways/{id}': {
+      get: {
+        summary: 'Get a gateway',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Gateway' } },
+      },
+      patch: {
+        summary: 'Update a gateway management record',
+        description: 'Runtime status fields are managed by WebSocket clients, not this endpoint.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string', pattern: '^[a-zA-Z0-9_-]+$' },
+                  publicIp: { type: ['string', 'null'], format: 'ipv4' },
+                  region: { type: ['string', 'null'] },
+                },
+              },
+            },
+          },
+        },
+        responses: { '200': { description: 'Updated gateway' } },
+      },
+      delete: {
+        summary: 'Delete a gateway',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Gateway deleted' } },
+      },
+    },
+    '/api/tunnels': {
+      get: {
+        summary: 'List tunnels',
+        responses: { '200': { description: 'Tunnel list' } },
+      },
+      post: {
+        summary: 'Create a tunnel',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/TunnelCreate' } } },
+        },
+        responses: { '201': { description: 'Created tunnel' } },
+      },
+    },
+    '/api/tunnels/{id}': {
+      get: {
+        summary: 'Get a tunnel',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Tunnel' } },
+      },
+      patch: {
+        summary: 'Update a tunnel',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Updated tunnel' } },
+      },
+      delete: {
+        summary: 'Delete a tunnel',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Tunnel deleted' } },
+      },
+    },
+    '/api/dns/zones': {
+      get: { summary: 'List DNS zones', responses: { '200': { description: 'DNS zone list' } } },
+    },
+    '/api/dns/providers': {
+      get: { summary: 'List DNS providers', responses: { '200': { description: 'DNS provider list' } } },
+      post: { summary: 'Create a DNS provider', responses: { '201': { description: 'DNS provider created' } } },
+    },
+    '/api/dns/providers/{id}': {
+      patch: {
+        summary: 'Update a DNS provider',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'DNS provider updated' } },
+      },
+      delete: {
+        summary: 'Delete a DNS provider',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'DNS provider deleted' } },
+      },
+    },
+    '/api/dns/providers/{id}/zones/import': {
+      post: {
+        summary: 'Import zones from a DNS provider',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Imported zones' } },
+      },
+    },
+    '/api/dns/sync': {
+      post: { summary: 'Sync all DNS settings or one tunnel', responses: { '200': { description: 'DNS sync result' } } },
+    },
+  },
+};
+
+export async function GET() {
+  return apiJson(openApiDocument);
+}

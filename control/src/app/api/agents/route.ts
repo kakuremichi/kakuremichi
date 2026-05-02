@@ -1,18 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { db, agents } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
 import { createAgentSchema } from '@/lib/utils/validation';
 import { generateAgentApiKey } from '@/lib/utils';
 import { withAuth } from '@/lib/auth';
+import { agentResource } from '@/lib/api/resources';
+import { apiCreated, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
 
 export async function GET(request: NextRequest) {
   return withAuth(request, 'read', async () => {
     try {
       const allAgents = await db.select().from(agents);
-      return NextResponse.json(allAgents);
+      return apiJson(allAgents.map((agent) => agentResource(agent)));
     } catch (error) {
       console.error('Failed to fetch agents:', error);
-      return NextResponse.json({ error: 'Failed to fetch agents' }, { status: 500 });
+      return apiRouteError(error, 'Failed to fetch agents');
     }
   });
 }
@@ -20,7 +22,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withAuth(request, 'write', async () => {
     try {
-      const body = await request.json();
+      const body = await readJsonBody(request);
       const validatedData = createAgentSchema.parse(body);
 
       const apiKey = generateAgentApiKey();
@@ -45,13 +47,14 @@ export async function POST(request: NextRequest) {
         console.error('Failed to broadcast agent creation config:', err);
       }
 
-      return NextResponse.json(newAgent[0], { status: 201 });
+      const createdAgent = newAgent[0];
+      if (!createdAgent) {
+        throw new Error('Agent insert returned no row');
+      }
+      return apiCreated(agentResource(createdAgent, { includeApiKey: true }));
     } catch (error) {
       console.error('Failed to create agent:', error);
-      if (error instanceof Error && 'issues' in error) {
-        return NextResponse.json({ error: 'Validation failed', details: error }, { status: 400 });
-      }
-      return NextResponse.json({ error: 'Failed to create agent' }, { status: 500 });
+      return apiRouteError(error, 'Failed to create agent');
     }
   });
 }

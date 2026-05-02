@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { syncAllDnsSettings, syncTunnelDns } from '@/lib/dns/sync';
 import { withAuth } from '@/lib/auth';
+import { apiError, apiJson, apiRouteError } from '@/lib/api/response';
 
 const syncSchema = z.object({
   tunnelId: z.string().uuid().optional(),
-});
+}).strict();
 
 export async function POST(request: NextRequest) {
   return withAuth(request, 'write', async () => {
@@ -14,18 +15,19 @@ export async function POST(request: NextRequest) {
       const data = syncSchema.parse(body);
       if (data.tunnelId) {
         const result = await syncTunnelDns(data.tunnelId);
-        return NextResponse.json(result);
+        return apiJson(result);
       }
       const results = await syncAllDnsSettings();
-      return NextResponse.json({ results });
+      return apiJson({ results });
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return NextResponse.json({ error: 'Invalid request', details: err.issues }, { status: 400 });
+        return apiRouteError(err, 'Failed to sync DNS');
       }
       console.error('Failed to sync DNS:', err);
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : 'Failed to sync DNS' },
-        { status: 500 }
+      return apiError(
+        'dns_sync_error',
+        err instanceof Error ? err.message : 'Failed to sync DNS',
+        502
       );
     }
   });

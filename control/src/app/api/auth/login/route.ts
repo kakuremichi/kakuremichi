@@ -1,17 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, users } from '@/lib/db';
 import { getSessionForRoute, verifyPassword } from '@/lib/auth';
+import { apiError, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
-});
+}).strict();
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request);
     const { email, password } = loginSchema.parse(body);
 
     const row = await db
@@ -22,10 +23,10 @@ export async function POST(request: NextRequest) {
     const user = row[0];
     const ok = user ? await verifyPassword(password, user.passwordHash) : false;
     if (!user || !ok) {
-      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+      return apiError('invalid_credentials', 'Invalid email or password', 401);
     }
 
-    const res = NextResponse.json({
+    const res = apiJson({
       id: user.id,
       email: user.email,
       role: user.role,
@@ -37,10 +38,7 @@ export async function POST(request: NextRequest) {
     await session.save();
     return res;
   } catch (err) {
-    if (err instanceof z.ZodError) {
-      return NextResponse.json({ error: 'Invalid request', details: err.issues }, { status: 400 });
-    }
     console.error('Login failed:', err);
-    return NextResponse.json({ error: 'Login failed' }, { status: 500 });
+    return apiRouteError(err, 'Login failed');
   }
 }

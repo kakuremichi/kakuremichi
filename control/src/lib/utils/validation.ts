@@ -50,7 +50,16 @@ export const ipv4Schema = z
 export const createAgentSchema = z.object({
   name: nameSchema,
   wireguardPublicKey: z.string().min(1).optional(),
-});
+}).strict();
+
+/**
+ * Agent update validation schema
+ *
+ * Runtime fields such as status and lastSeenAt are owned by WebSocket clients.
+ */
+export const updateAgentSchema = z.object({
+  name: nameSchema.optional(),
+}).strict();
 
 /**
  * Gateway creation validation schema
@@ -60,7 +69,18 @@ export const createGatewaySchema = z.object({
   publicIp: ipv4Schema.optional(),
   wireguardPublicKey: z.string().min(1).optional(),
   region: z.string().max(32).optional(),
-});
+}).strict();
+
+/**
+ * Gateway update validation schema
+ *
+ * Runtime fields such as status and lastSeenAt are owned by WebSocket clients.
+ */
+export const updateGatewaySchema = z.object({
+  name: nameSchema.optional(),
+  publicIp: ipv4Schema.nullable().optional(),
+  region: z.string().max(32).nullable().optional(),
+}).strict();
 
 /**
  * Tunnel creation validation schema
@@ -84,7 +104,7 @@ export const createTunnelSchema = z.object({
       proxied: z.boolean().optional().default(false),
     })
     .optional(),
-});
+}).strict();
 
 /**
  * Tunnel update validation schema
@@ -97,4 +117,4 @@ export const updateTunnelSchema = z.object({
   // Exit Node (Outbound Proxy) settings
   httpProxyEnabled: z.boolean().optional(),
   socksProxyEnabled: z.boolean().optional(),
-});
+}).strict();

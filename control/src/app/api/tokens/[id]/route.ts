@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, apiTokens } from '@/lib/db';
 import { withAuth } from '@/lib/auth';
+import { apiError, apiOk } from '@/lib/api/response';
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   return withAuth(request, 'write', async (auth) => {
@@ -13,8 +14,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     const deleted = await db.delete(apiTokens).where(where).returning({ id: apiTokens.id });
     if (deleted.length === 0) {
-      return NextResponse.json({ error: 'Token not found' }, { status: 404 });
+      return apiError('not_found', 'Token not found', 404);
     }
-    return NextResponse.json({ ok: true });
+    return apiOk();
   });
 }

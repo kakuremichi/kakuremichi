@@ -1,8 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { db, agents } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
+import { agentResource } from '@/lib/api/resources';
+import { apiError, apiJson, apiOk, apiRouteError, readJsonBody } from '@/lib/api/response';
+import { updateAgentSchema } from '@/lib/utils/validation';
 
 export async function GET(
   request: NextRequest,
@@ -12,13 +15,14 @@ export async function GET(
     try {
       const { id } = await params;
       const agent = await db.select().from(agents).where(eq(agents.id, id)).limit(1);
-      if (agent.length === 0) {
-        return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+      const foundAgent = agent[0];
+      if (!foundAgent) {
+        return apiError('not_found', 'Agent not found', 404);
       }
-      return NextResponse.json(agent[0]);
+      return apiJson(agentResource(foundAgent));
     } catch (error) {
       console.error('Failed to fetch agent:', error);
-      return NextResponse.json({ error: 'Failed to fetch agent' }, { status: 500 });
+      return apiRouteError(error, 'Failed to fetch agent');
     }
   });
 }
@@ -32,7 +36,7 @@ export async function DELETE(
       const { id } = await params;
       const deleted = await db.delete(agents).where(eq(agents.id, id)).returning();
       if (deleted.length === 0) {
-        return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+        return apiError('not_found', 'Agent not found', 404);
       }
 
       try {
@@ -44,10 +48,10 @@ export async function DELETE(
         console.error('Failed to broadcast agent delete config:', err);
       }
 
-      return NextResponse.json({ success: true });
+      return apiOk();
     } catch (error) {
       console.error('Failed to delete agent:', error);
-      return NextResponse.json({ error: 'Failed to delete agent' }, { status: 500 });
+      return apiRouteError(error, 'Failed to delete agent');
     }
   });
 }
@@ -59,21 +63,21 @@ export async function PATCH(
   return withAuth(request, 'write', async () => {
     try {
       const { id } = await params;
-      const body = await request.json();
-      const { status, lastSeenAt } = body;
+      const body = await readJsonBody(request);
+      const validatedData = updateAgentSchema.parse(body);
 
       const updated = await db
         .update(agents)
         .set({
-          ...(status && { status }),
-          ...(lastSeenAt && { lastSeenAt: new Date(lastSeenAt) }),
+          ...validatedData,
           updatedAt: new Date(),
         })
         .where(eq(agents.id, id))
         .returning();
 
-      if (updated.length === 0) {
-        return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+      const updatedAgent = updated[0];
+      if (!updatedAgent) {
+        return apiError('not_found', 'Agent not found', 404);
       }
 
       try {
@@ -85,10 +89,10 @@ export async function PATCH(
         console.error('Failed to broadcast agent update config:', err);
       }
 
-      return NextResponse.json(updated[0]);
+      return apiJson(agentResource(updatedAgent));
     } catch (error) {
       console.error('Failed to update agent:', error);
-      return NextResponse.json({ error: 'Failed to update agent' }, { status: 500 });
+      return apiRouteError(error, 'Failed to update agent');
     }
   });
 }

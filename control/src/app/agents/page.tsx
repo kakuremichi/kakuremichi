@@ -5,11 +5,16 @@ import { useEffect, useState } from 'react'
 interface Agent {
   id: string
   name: string
-  apiKey: string
+  apiKeyPrefix: string | null
   wireguardPublicKey: string | null
   status: string
   lastSeenAt: string | null
   createdAt: string
+}
+
+interface CreatedAgentCredential {
+  name: string
+  apiKey: string
 }
 
 export default function AgentsPage() {
@@ -18,6 +23,7 @@ export default function AgentsPage() {
   const [error, setError] = useState('')
   const [showNewForm, setShowNewForm] = useState(false)
   const [newAgentName, setNewAgentName] = useState('')
+  const [createdCredential, setCreatedCredential] = useState<CreatedAgentCredential | null>(null)
 
   useEffect(() => {
     fetchAgents()
@@ -50,7 +56,9 @@ export default function AgentsPage() {
       })
 
       if (!res.ok) throw new Error('Failed to create agent')
+      const created = await res.json()
 
+      setCreatedCredential({ name: created.name, apiKey: created.apiKey })
       setNewAgentName('')
       setShowNewForm(false)
       fetchAgents()
@@ -85,6 +93,22 @@ export default function AgentsPage() {
           {showNewForm ? 'Cancel' : 'New Agent'}
         </button>
       </div>
+
+      {createdCredential && (
+        <div className="card" style={{ marginBottom: '2rem', borderLeft: '4px solid #f59e0b' }}>
+          <h2>New Agent API Key</h2>
+          <p style={{ color: '#92400e', marginBottom: '1rem' }}>
+            Save this key now. It is shown only after creation.
+          </p>
+          <p style={{ color: '#666', marginBottom: '0.5rem' }}>{createdCredential.name}</p>
+          <code style={{ display: 'block', padding: '0.75rem', background: '#f3f4f6', wordBreak: 'break-all' }}>
+            {createdCredential.apiKey}
+          </code>
+          <button className="secondary" style={{ marginTop: '1rem' }} onClick={() => setCreatedCredential(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {showNewForm && (
         <div className="card" style={{ marginBottom: '2rem' }}>
@@ -128,7 +152,7 @@ export default function AgentsPage() {
                   </td>
                   <td>
                     <code style={{ fontSize: '0.75rem' }}>
-                      {agent.apiKey}
+                      {agent.apiKeyPrefix ? `${agent.apiKeyPrefix}...` : '-'}
                     </code>
                   </td>
                   <td style={{ fontSize: '0.875rem', color: '#666' }}>

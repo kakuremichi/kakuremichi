@@ -1,13 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, dnsProviders } from '@/lib/db';
 import { withAuth } from '@/lib/auth';
+import { apiError, apiJson, apiOk, apiRouteError, readJsonBody } from '@/lib/api/response';
 
 const updateProviderSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   enabled: z.boolean().optional(),
-});
+}).strict();
 
 export async function PATCH(
   request: NextRequest,
@@ -16,7 +17,7 @@ export async function PATCH(
   return withAuth(request, 'admin', async () => {
     try {
       const { id } = await params;
-      const body = await request.json();
+      const body = await readJsonBody(request);
       const data = updateProviderSchema.parse(body);
       const [row] = await db
         .update(dnsProviders)
@@ -38,15 +39,12 @@ export async function PATCH(
         });
 
       if (!row) {
-        return NextResponse.json({ error: 'DNS provider not found' }, { status: 404 });
+        return apiError('not_found', 'DNS provider not found', 404);
       }
-      return NextResponse.json(row);
+      return apiJson(row);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return NextResponse.json({ error: 'Invalid request', details: err.issues }, { status: 400 });
-      }
       console.error('Failed to update DNS provider:', err);
-      return NextResponse.json({ error: 'Failed to update DNS provider' }, { status: 500 });
+      return apiRouteError(err, 'Failed to update DNS provider');
     }
   });
 }
@@ -62,8 +60,8 @@ export async function DELETE(
       .where(eq(dnsProviders.id, id))
       .returning({ id: dnsProviders.id });
     if (deleted.length === 0) {
-      return NextResponse.json({ error: 'DNS provider not found' }, { status: 404 });
+      return apiError('not_found', 'DNS provider not found', 404);
     }
-    return NextResponse.json({ ok: true });
+    return apiOk();
   });
 }

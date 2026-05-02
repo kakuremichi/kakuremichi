@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { db, tunnels } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
 import { deleteTunnelDnsRecords, syncTunnelDns } from '@/lib/dns/sync';
 import { updateTunnelSchema } from '@/lib/utils/validation';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
+import { apiError, apiJson, apiOk, apiRouteError, readJsonBody } from '@/lib/api/response';
 
 export async function GET(
   request: NextRequest,
@@ -14,13 +15,14 @@ export async function GET(
     try {
       const { id } = await params;
       const tunnel = await db.select().from(tunnels).where(eq(tunnels.id, id)).limit(1);
-      if (tunnel.length === 0) {
-        return NextResponse.json({ error: 'Tunnel not found' }, { status: 404 });
+      const foundTunnel = tunnel[0];
+      if (!foundTunnel) {
+        return apiError('not_found', 'Tunnel not found', 404);
       }
-      return NextResponse.json(tunnel[0]);
+      return apiJson(foundTunnel);
     } catch (error) {
       console.error('Failed to fetch tunnel:', error);
-      return NextResponse.json({ error: 'Failed to fetch tunnel' }, { status: 500 });
+      return apiRouteError(error, 'Failed to fetch tunnel');
     }
   });
 }
@@ -32,7 +34,7 @@ export async function PATCH(
   return withAuth(request, 'write', async () => {
     try {
       const { id } = await params;
-      const body = await request.json();
+      const body = await readJsonBody(request);
       const validatedData = updateTunnelSchema.parse(body);
 
       const updated = await db
@@ -43,7 +45,7 @@ export async function PATCH(
 
       const updatedTunnel = updated[0];
       if (!updatedTunnel) {
-        return NextResponse.json({ error: 'Tunnel not found' }, { status: 404 });
+        return apiError('not_found', 'Tunnel not found', 404);
       }
 
       try {
@@ -64,13 +66,10 @@ export async function PATCH(
         console.error('Failed to broadcast tunnel update config:', err);
       }
 
-      return NextResponse.json(updatedTunnel);
+      return apiJson(updatedTunnel);
     } catch (error) {
       console.error('Failed to update tunnel:', error);
-      if (error instanceof Error && 'issues' in error) {
-        return NextResponse.json({ error: 'Validation failed', details: error }, { status: 400 });
-      }
-      return NextResponse.json({ error: 'Failed to update tunnel' }, { status: 500 });
+      return apiRouteError(error, 'Failed to update tunnel');
     }
   });
 }
@@ -90,7 +89,7 @@ export async function DELETE(
       const deleted = await db.delete(tunnels).where(eq(tunnels.id, id)).returning();
       const deletedTunnel = deleted[0];
       if (!deletedTunnel) {
-        return NextResponse.json({ error: 'Tunnel not found' }, { status: 404 });
+        return apiError('not_found', 'Tunnel not found', 404);
       }
 
       try {
@@ -105,10 +104,10 @@ export async function DELETE(
         console.error('Failed to broadcast tunnel delete config:', err);
       }
 
-      return NextResponse.json({ success: true });
+      return apiOk();
     } catch (error) {
       console.error('Failed to delete tunnel:', error);
-      return NextResponse.json({ error: 'Failed to delete tunnel' }, { status: 500 });
+      return apiRouteError(error, 'Failed to delete tunnel');
     }
   });
 }

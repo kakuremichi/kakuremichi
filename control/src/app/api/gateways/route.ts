@@ -1,19 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { db, gateways } from '@/lib/db';
 import { createGatewaySchema } from '@/lib/utils/validation';
 import { generateGatewayApiKey, allocateTunnelIpsForGateway } from '@/lib/utils';
 import { getWebSocketServer } from '@/lib/ws';
 import { syncAllDnsSettings } from '@/lib/dns/sync';
 import { withAuth } from '@/lib/auth';
+import { gatewayResource } from '@/lib/api/resources';
+import { apiCreated, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
 
 export async function GET(request: NextRequest) {
   return withAuth(request, 'read', async () => {
     try {
       const allGateways = await db.select().from(gateways);
-      return NextResponse.json(allGateways);
+      return apiJson(allGateways.map((gateway) => gatewayResource(gateway)));
     } catch (error) {
       console.error('Failed to fetch gateways:', error);
-      return NextResponse.json({ error: 'Failed to fetch gateways' }, { status: 500 });
+      return apiRouteError(error, 'Failed to fetch gateways');
     }
   });
 }
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withAuth(request, 'write', async () => {
     try {
-      const body = await request.json();
+      const body = await readJsonBody(request);
       const validatedData = createGatewaySchema.parse(body);
 
       const apiKey = generateGatewayApiKey();
@@ -56,13 +58,13 @@ export async function POST(request: NextRequest) {
         console.error('Failed to broadcast gateway creation config:', err);
       }
 
-      return NextResponse.json(createdGateway, { status: 201 });
+      if (!createdGateway) {
+        throw new Error('Gateway insert returned no row');
+      }
+      return apiCreated(gatewayResource(createdGateway, { includeApiKey: true }));
     } catch (error) {
       console.error('Failed to create gateway:', error);
-      if (error instanceof Error && 'issues' in error) {
-        return NextResponse.json({ error: 'Validation failed', details: error }, { status: 400 });
-      }
-      return NextResponse.json({ error: 'Failed to create gateway' }, { status: 500 });
+      return apiRouteError(error, 'Failed to create gateway');
     }
   });
 }

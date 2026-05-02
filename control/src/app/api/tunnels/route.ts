@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   db,
   tunnels,
@@ -14,6 +14,7 @@ import { createTunnelSchema, allocateTunnelSubnetSync, allocateGatewayIpsForTunn
 import { syncTunnelDns } from '@/lib/dns/sync';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
+import { apiCreated, apiError, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
 
 export async function GET(request: NextRequest) {
   return withAuth(request, 'read', async () => {
@@ -95,10 +96,10 @@ export async function GET(request: NextRequest) {
         dnsSync: dnsSyncByTunnel.get(tunnel.id) || null,
       }));
 
-      return NextResponse.json(tunnelsWithGatewayIps);
+      return apiJson(tunnelsWithGatewayIps);
     } catch (error) {
       console.error('Failed to fetch tunnels:', error);
-      return NextResponse.json({ error: 'Failed to fetch tunnels' }, { status: 500 });
+      return apiRouteError(error, 'Failed to fetch tunnels');
     }
   });
 }
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withAuth(request, 'write', async () => {
     try {
-      const body = await request.json();
+      const body = await readJsonBody(request);
       const validatedData = createTunnelSchema.parse(body);
 
       if (validatedData.dnsSync?.enabled) {
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
           .where(eq(dnsZones.id, validatedData.dnsSync.zoneId))
           .limit(1);
         if (zone.length === 0) {
-          return NextResponse.json({ error: 'DNS zone not found' }, { status: 404 });
+          return apiError('not_found', 'DNS zone not found', 404);
         }
       }
 
@@ -167,7 +168,7 @@ export async function POST(request: NextRequest) {
       });
 
       if ('agentMissing' in result) {
-        return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+        return apiError('not_found', 'Agent not found', 404);
       }
       const createdTunnel = result.tunnel;
       if (createdTunnel) {
@@ -195,13 +196,10 @@ export async function POST(request: NextRequest) {
         console.error('Failed to broadcast tunnel creation config:', err);
       }
 
-      return NextResponse.json(createdTunnel, { status: 201 });
+      return apiCreated(createdTunnel);
     } catch (error) {
       console.error('Failed to create tunnel:', error);
-      if (error instanceof Error && 'issues' in error) {
-        return NextResponse.json({ error: 'Validation failed', details: error }, { status: 400 });
-      }
-      return NextResponse.json({ error: 'Failed to create tunnel' }, { status: 500 });
+      return apiRouteError(error, 'Failed to create tunnel');
     }
   });
 }

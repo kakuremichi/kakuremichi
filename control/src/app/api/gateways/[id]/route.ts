@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { db, gateways } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
 import { getWebSocketServer } from '@/lib/ws';
 import { syncAllDnsSettings } from '@/lib/dns/sync';
+import { gatewayResource } from '@/lib/api/resources';
+import { apiError, apiJson, apiOk, apiRouteError, readJsonBody } from '@/lib/api/response';
+import { updateGatewaySchema } from '@/lib/utils/validation';
 
 async function broadcastGatewayChange() {
   try {
@@ -32,13 +35,14 @@ export async function GET(
     try {
       const { id } = await params;
       const gateway = await db.select().from(gateways).where(eq(gateways.id, id)).limit(1);
-      if (gateway.length === 0) {
-        return NextResponse.json({ error: 'Gateway not found' }, { status: 404 });
+      const foundGateway = gateway[0];
+      if (!foundGateway) {
+        return apiError('not_found', 'Gateway not found', 404);
       }
-      return NextResponse.json(gateway[0]);
+      return apiJson(gatewayResource(foundGateway));
     } catch (error) {
       console.error('Failed to fetch gateway:', error);
-      return NextResponse.json({ error: 'Failed to fetch gateway' }, { status: 500 });
+      return apiRouteError(error, 'Failed to fetch gateway');
     }
   });
 }
@@ -52,14 +56,14 @@ export async function DELETE(
       const { id } = await params;
       const deleted = await db.delete(gateways).where(eq(gateways.id, id)).returning();
       if (deleted.length === 0) {
-        return NextResponse.json({ error: 'Gateway not found' }, { status: 404 });
+        return apiError('not_found', 'Gateway not found', 404);
       }
       await reconcileDns();
       await broadcastGatewayChange();
-      return NextResponse.json({ success: true });
+      return apiOk();
     } catch (error) {
       console.error('Failed to delete gateway:', error);
-      return NextResponse.json({ error: 'Failed to delete gateway' }, { status: 500 });
+      return apiRouteError(error, 'Failed to delete gateway');
     }
   });
 }
@@ -71,29 +75,28 @@ export async function PATCH(
   return withAuth(request, 'write', async () => {
     try {
       const { id } = await params;
-      const body = await request.json();
-      const { status, lastSeenAt, publicIp } = body;
+      const body = await readJsonBody(request);
+      const validatedData = updateGatewaySchema.parse(body);
 
       const updated = await db
         .update(gateways)
         .set({
-          ...(status && { status }),
-          ...(lastSeenAt && { lastSeenAt: new Date(lastSeenAt) }),
-          ...(publicIp !== undefined && { publicIp }),
+          ...validatedData,
           updatedAt: new Date(),
         })
         .where(eq(gateways.id, id))
         .returning();
 
-      if (updated.length === 0) {
-        return NextResponse.json({ error: 'Gateway not found' }, { status: 404 });
+      const updatedGateway = updated[0];
+      if (!updatedGateway) {
+        return apiError('not_found', 'Gateway not found', 404);
       }
       await reconcileDns();
       await broadcastGatewayChange();
-      return NextResponse.json(updated[0]);
+      return apiJson(gatewayResource(updatedGateway));
     } catch (error) {
       console.error('Failed to update gateway:', error);
-      return NextResponse.json({ error: 'Failed to update gateway' }, { status: 500 });
+      return apiRouteError(error, 'Failed to update gateway');
     }
   });
 }

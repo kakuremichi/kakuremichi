@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { getIronSession } from 'iron-session';
 import { db, users, apiTokens, type UserRole } from '@/lib/db';
+import { apiError } from '@/lib/api/response';
 import { sessionOptions, type SessionData } from './session';
 import { hashToken, isValidTokenFormat } from './tokens';
 
@@ -112,10 +113,11 @@ export async function requireAuth(
 
 export function authErrorResponse(err: unknown): NextResponse {
   if (err instanceof AuthError) {
-    return NextResponse.json({ error: err.message }, { status: err.status });
+    const code = err.status === 401 ? 'unauthorized' : 'forbidden';
+    return apiError(code, err.message, err.status);
   }
   console.error('Auth error:', err);
-  return NextResponse.json({ error: 'Authentication failed' }, { status: 500 });
+  return apiError('auth_failed', 'Authentication failed', 500);
 }
 
 export async function withAuth<T>(

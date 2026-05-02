@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
 import { db, dnsProviders, dnsZones } from '@/lib/db';
 import { withAuth } from '@/lib/auth';
+import { apiJson } from '@/lib/api/response';
 
 export async function GET(request: NextRequest) {
   return withAuth(request, 'read', async () => {
@@ -20,6 +21,6 @@ export async function GET(request: NextRequest) {
       .from(dnsZones)
       .innerJoin(dnsProviders, eq(dnsZones.providerId, dnsProviders.id))
       .orderBy(desc(dnsZones.createdAt));
-    return NextResponse.json(rows);
+    return apiJson(rows);
   });
 }
