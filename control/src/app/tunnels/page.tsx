@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { Background, MarkerType, Position, ReactFlow, type Edge, type Node } from '@xyflow/react'
 
 interface GatewayIP {
   gatewayId: string
@@ -1114,63 +1115,328 @@ function Topology({
       lastError: null,
       agent: tunnel.agent,
     }]
+  const backendRows = backendNodes.map(backend => {
+    const agentStatus = getBackendAgentStatus(backend)
+    const hasAgentIp = Boolean(backend.agentIp && backend.agentIp !== 'No agent IP')
+    const selectable = backend.enabled && hasAgentIp && agentStatus === 'online'
+    return {
+      backend,
+      agentName: getBackendAgentName(backend),
+      agentStatus,
+      hasAgentIp,
+      selectable,
+      weight: backend.weight > 0 ? backend.weight : 1,
+    }
+  })
+  const selectableRows = backendRows.filter(row => row.selectable)
+  const activePriority = selectableRows.length > 0
+    ? Math.min(...selectableRows.map(row => row.backend.priority))
+    : null
+  const priorityRows = activePriority === null
+    ? []
+    : selectableRows.filter(row => row.backend.priority === activePriority)
+  const nonDrainingRows = priorityRows.filter(row => !row.backend.draining)
+  const activeRows = nonDrainingRows.length > 0 ? nonDrainingRows : priorityRows
+  const activeIds = new Set(activeRows.map(row => row.backend.id))
+  const totalActiveWeight = activeRows.reduce((sum, row) => sum + row.weight, 0)
+  const displayRows = [...backendRows].sort((a, b) => {
+    const activeDelta = Number(activeIds.has(b.backend.id)) - Number(activeIds.has(a.backend.id))
+    if (activeDelta !== 0) return activeDelta
+    if (a.backend.priority !== b.backend.priority) return a.backend.priority - b.backend.priority
+    return a.agentName.localeCompare(b.agentName)
+  })
+  const activeCount = activeRows.length
+  const lbSummary = activeCount > 0
+    ? `${activeCount} active / weight ${totalActiveWeight}`
+    : 'No selectable backend'
+  const graphRows = Math.max(displayRows.length, 1)
+  const poolHeight = 70 + graphRows * 96
+  const graphHeight = Math.max(300, poolHeight + 46)
+
+  function getBackendState(row: (typeof backendRows)[number]) {
+    if (!row.backend.enabled) return 'disabled'
+    if (!row.hasAgentIp) return 'no agent IP'
+    if (row.agentStatus !== 'online') return row.agentStatus
+    if (activePriority !== null && row.backend.priority !== activePriority) return `standby p${row.backend.priority}`
+    if (row.backend.draining && nonDrainingRows.length > 0) return 'draining'
+    if (activeIds.has(row.backend.id) && row.backend.draining) return 'draining fallback'
+    if (activeIds.has(row.backend.id)) return 'active'
+    return 'standby'
+  }
+
+  const nodes: Node<{ label: ReactNode }>[] = [
+    {
+      id: 'client',
+      type: 'input',
+      position: { x: 0, y: 88 },
+      sourcePosition: Position.Right,
+      data: {
+        label: (
+          <TopologyFlowCard tone="source" eyebrow="Client" title="Public request" meta={tunnel.domain} />
+        ),
+      },
+      className: 'topology-flow-node',
+      draggable: false,
+      selectable: false,
+      style: { width: 118 },
+    },
+    {
+      id: 'gateway-pool',
+      position: { x: 140, y: 52 },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      data: {
+        label: (
+          <TopologyFlowCard
+            tone="gateway"
+            eyebrow="Gateway pool"
+            title={`${gatewayNodes.length} gateway${gatewayNodes.length === 1 ? '' : 's'}`}
+            meta="public edge nodes"
+          >
+            <div className="topology-flow-list">
+              {gatewayNodes.map(gatewayIp => {
+                const gateway = getGateway(gatewayIp.gatewayId)
+                return (
+                  <div key={gatewayIp.gatewayId}>
+                    <span>{gatewayIp.gatewayName}</span>
+                    <strong>{gateway?.publicIp || 'No public IP'}</strong>
+                    <small>{gatewayIp.ip}</small>
+                  </div>
+                )
+              })}
+            </div>
+          </TopologyFlowCard>
+        ),
+      },
+      className: 'topology-flow-node',
+      draggable: false,
+      selectable: false,
+      style: { width: 160 },
+    },
+    {
+      id: 'load-balancer',
+      position: { x: 330, y: 82 },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      data: {
+        label: (
+          <TopologyFlowCard tone="balancer" eyebrow="Load Balancer" title="Weighted RR" meta={lbSummary}>
+            <div className="topology-lb-criteria">
+              <span>priority {activePriority ?? '-'}</span>
+              <span>healthy only</span>
+              <span>drain aware</span>
+            </div>
+          </TopologyFlowCard>
+        ),
+      },
+      className: 'topology-flow-node',
+      draggable: false,
+      selectable: false,
+      style: { width: 142 },
+    },
+    {
+      id: 'backend-pool',
+      type: 'group',
+      position: { x: 500, y: 18 },
+      data: { label: <></> },
+      className: 'topology-flow-pool',
+      draggable: false,
+      selectable: false,
+      style: { width: 340, height: poolHeight },
+    },
+    {
+      id: 'backend-pool-header',
+      position: { x: 16, y: 14 },
+      parentId: 'backend-pool',
+      data: {
+        label: (
+          <div className="topology-flow-pool-header">
+            <span>Backend pool</span>
+            <strong>{activeCount} active of {backendRows.length}</strong>
+            <small>Lower priority wins, then weight splits traffic.</small>
+          </div>
+        ),
+      },
+      className: 'topology-flow-node topology-flow-header-node',
+      draggable: false,
+      selectable: false,
+      style: { width: 308 },
+    },
+  ]
+
+  displayRows.forEach((row, index) => {
+    const backendActive = activeIds.has(row.backend.id)
+    const backendState = getBackendState(row)
+    const share = backendActive && totalActiveWeight > 0
+      ? Math.round((row.weight / totalActiveWeight) * 100)
+      : 0
+    const y = 70 + index * 96
+
+    nodes.push(
+      {
+        id: `agent-${row.backend.id}`,
+        position: { x: 14, y },
+        parentId: 'backend-pool',
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        data: {
+          label: (
+            <TopologyFlowCard
+              tone={backendActive ? 'agent active' : 'agent inactive'}
+              eyebrow="Agent"
+              title={row.agentName}
+              meta={`${row.backend.agentIp} / p${row.backend.priority}`}
+            >
+              <TopologyShare share={share} active={backendActive} />
+            </TopologyFlowCard>
+          ),
+        },
+        className: 'topology-flow-node',
+        draggable: false,
+        selectable: false,
+        style: { width: 128 },
+      },
+      {
+        id: `service-${row.backend.id}`,
+        position: { x: 188, y },
+        parentId: 'backend-pool',
+        targetPosition: Position.Left,
+        data: {
+          label: (
+            <TopologyFlowCard
+              tone={backendActive ? 'target active' : 'target inactive'}
+              eyebrow="Service"
+              title={row.backend.target}
+              meta={`${backendState} / w${row.backend.weight}`}
+            />
+          ),
+        },
+        className: 'topology-flow-node',
+        draggable: false,
+        selectable: false,
+        style: { width: 136 },
+      }
+    )
+  })
+
+  const edges: Edge[] = [
+    {
+      id: 'client-gateway',
+      source: 'client',
+      target: 'gateway-pool',
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      className: 'topology-flow-edge topology-flow-edge-main',
+    },
+    {
+      id: 'gateway-lb',
+      source: 'gateway-pool',
+      target: 'load-balancer',
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      className: 'topology-flow-edge topology-flow-edge-main',
+    },
+  ]
+
+  displayRows.forEach(row => {
+    const backendActive = activeIds.has(row.backend.id)
+    const backendState = getBackendState(row)
+    const share = backendActive && totalActiveWeight > 0
+      ? Math.round((row.weight / totalActiveWeight) * 100)
+      : 0
+
+    edges.push(
+      {
+        id: `lb-agent-${row.backend.id}`,
+        source: 'load-balancer',
+        target: `agent-${row.backend.id}`,
+        type: 'smoothstep',
+        animated: backendActive && activeCount > 1,
+        label: backendActive ? `${share}%` : backendState,
+        labelBgPadding: [6, 4],
+        labelBgBorderRadius: 6,
+        labelBgStyle: { fill: backendActive ? '#dcfce7' : '#f1f5f9' },
+        labelStyle: {
+          fill: backendActive ? '#166534' : '#64748b',
+          fontSize: 11,
+          fontWeight: 800,
+        },
+        markerEnd: { type: MarkerType.ArrowClosed },
+        className: backendActive
+          ? 'topology-flow-edge topology-flow-edge-active'
+          : 'topology-flow-edge topology-flow-edge-inactive',
+      },
+      {
+        id: `agent-service-${row.backend.id}`,
+        source: `agent-${row.backend.id}`,
+        target: `service-${row.backend.id}`,
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed },
+        className: backendActive
+          ? 'topology-flow-edge topology-flow-edge-service'
+          : 'topology-flow-edge topology-flow-edge-inactive',
+      }
+    )
+  })
 
   return (
-    <div className="topology-map" aria-label="Tunnel topology">
-      <div className="topology-overview">
-        <div className="topology-node source">
-          <span>Client</span>
-          <strong>Public request</strong>
-          <small>{tunnel.domain}</small>
-        </div>
-        <div className="topology-edge" />
-        <div className="topology-gateway-stack">
-          {gatewayNodes.map(gatewayIp => {
-            const gateway = getGateway(gatewayIp.gatewayId)
-            return (
-              <div key={gatewayIp.gatewayId} className="topology-node gateway">
-                <span>{gatewayIp.gatewayName}</span>
-                <strong>{gateway?.publicIp || 'No public IP'}</strong>
-                <small>{gatewayIp.ip}</small>
-              </div>
-            )
-          })}
-        </div>
-        <div className="topology-edge" />
-        <div className="topology-node balancer">
-          <span>Policy</span>
-          <strong>Weighted RR</strong>
-          <small>priority, drain, health</small>
-        </div>
+    <div className="topology-map topology-flow-wrap" aria-label="Tunnel topology">
+      <div className="topology-flow" style={{ height: graphHeight }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          fitView
+          fitViewOptions={{ padding: 0.03 }}
+          minZoom={0.55}
+          maxZoom={1.15}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          panOnDrag={false}
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          preventScrolling={false}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background color="#e2e8f0" gap={24} size={1} />
+        </ReactFlow>
       </div>
-      <div className="topology-branch-edge" aria-hidden="true" />
-      <div className="topology-agent-side">
-        <div className="topology-agent-side-header">
-          <span>Agent side</span>
-          <strong>{backendNodes.length} backend route{backendNodes.length === 1 ? '' : 's'}</strong>
-        </div>
-        <div className="topology-backend-stack">
-          {backendNodes.map(backend => {
-            const backendActive = backend.enabled && !backend.draining
-            const backendState = backend.draining ? 'drain' : getBackendAgentStatus(backend)
+    </div>
+  )
+}
 
-            return (
-              <div key={backend.id} className="topology-backend-route">
-                <div className={backendActive ? 'topology-node agent' : 'topology-node agent muted'}>
-                  <span>Agent</span>
-                  <strong>{getBackendAgentName(backend)}</strong>
-                  <small>{backend.agentIp} / w{backend.weight} / p{backend.priority} / {backendState}</small>
-                </div>
-                <div className="topology-edge topology-edge-inline" aria-hidden="true" />
-                <div className={backendActive ? 'topology-node target' : 'topology-node target muted'}>
-                  <span>Service</span>
-                  <strong>{backend.target}</strong>
-                  <small>origin target</small>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+function TopologyFlowCard({
+  tone,
+  eyebrow,
+  title,
+  meta,
+  children,
+}: {
+  tone: string
+  eyebrow: string
+  title: string
+  meta?: string
+  children?: ReactNode
+}) {
+  return (
+    <div className={`topology-flow-card ${tone}`}>
+      <span>{eyebrow}</span>
+      <strong>{title}</strong>
+      {meta && <small>{meta}</small>}
+      {children}
+    </div>
+  )
+}
+
+function TopologyShare({ share, active }: { share: number; active: boolean }) {
+  return (
+    <div className="topology-flow-share">
+      <div>
+        <strong>{share}%</strong>
+        <span>{active ? 'traffic share' : 'not selected'}</span>
+      </div>
+      <div className="topology-share-track" aria-hidden="true">
+        <div style={{ width: `${share}%` }} />
       </div>
     </div>
   )

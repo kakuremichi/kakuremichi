@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import '@xyflow/react/dist/style.css'
 import './globals.css'
 import { AuthGate } from './auth-gate'
 import { AppShell } from './app-shell'
