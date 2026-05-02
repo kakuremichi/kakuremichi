@@ -10,6 +10,7 @@ const server = spawn('npx', ['tsx', path.join(__dirname, '../server.ts')], {
   shell: true,
   env: {
     ...process.env,
+    NODE_ENV: process.env.NODE_ENV || 'production',
     PORT: process.env.PORT || '3000',
     WS_PATH: process.env.WS_PATH || '/ws',
   },
