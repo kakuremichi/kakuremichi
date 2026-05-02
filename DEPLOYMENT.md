@@ -179,6 +179,16 @@ sudo firewall-cmd --permanent --add-port=3001/tcp
 sudo firewall-cmd --reload
 ```
 
+Exit Node の HTTP/SOCKS5 プロキシを使う場合、Gateway は WireGuard 側で `8080/tcp` と `1080/tcp` を受けます。これらは Public IP 側には開けず、WireGuard インターフェースに限定して許可してください。
+
+```bash
+# Ubuntu/Debian (ufw)
+sudo ufw allow in on wg0 to any port 8080 proto tcp # Exit Node HTTP Proxy
+sudo ufw allow in on wg0 to any port 1080 proto tcp # Exit Node SOCKS5 Proxy
+```
+
+`wg0` 以外のインターフェース名を使う場合は、`WIREGUARD_INTERFACE` と同じ名前に置き換えてください。Public IP 宛ての `8080/tcp` / `1080/tcp` は開放しないでください。
+
 ### 2.4 Gatewayの起動
 
 #### バイナリで起動する場合
