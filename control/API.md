@@ -47,6 +47,14 @@ The machine-readable API description is available at:
 GET /api/openapi.json
 ```
 
+## Operational Notes
+
+Set a stable `ENCRYPTION_KEY` before creating DNS providers. DNS provider
+credentials are encrypted at rest; changing or losing the key makes existing
+provider credentials unreadable. `SESSION_SECRET` is accepted as a fallback for
+development, but production and shared debug environments should use a dedicated
+`ENCRYPTION_KEY`.
+
 ## Examples
 
 Create an Agent:
