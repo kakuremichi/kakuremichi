@@ -1,9 +1,13 @@
-export type DNSProviderType = 'cloudflare';
-export type DNSRecordType = 'A';
+export const DNS_PROVIDER_TYPES = ['cloudflare'] as const;
+export type DNSProviderType = (typeof DNS_PROVIDER_TYPES)[number];
+
+export const DNS_RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'TXT'] as const;
+export type DNSRecordType = (typeof DNS_RECORD_TYPES)[number];
 export type DNSSyncStrategy = 'all_gateways' | 'online_gateways';
 
 export interface DNSProviderConfig {
-  apiToken: string;
+  apiToken?: string;
+  [key: string]: unknown;
 }
 
 export interface DNSZone {
@@ -25,10 +29,18 @@ export interface DesiredDNSRecord {
   type: DNSRecordType;
   content: string;
   ttl: number;
-  proxied: boolean;
+  proxied?: boolean;
+}
+
+export interface DNSProviderCapabilities {
+  supportedRecordTypes: DNSRecordType[];
+  proxiedRecordTypes: DNSRecordType[];
+  supportsCredentialsValidation: boolean;
+  supportsZoneImport: boolean;
 }
 
 export interface DNSProvider {
+  getCapabilities(): DNSProviderCapabilities;
   validateCredentials(): Promise<void>;
   listZones(): Promise<DNSZone[]>;
   listRecords(zoneId: string, name: string, type: DNSRecordType): Promise<DNSRecord[]>;

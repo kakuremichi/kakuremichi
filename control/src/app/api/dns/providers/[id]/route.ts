@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, dnsProviders } from '@/lib/db';
+import { getDNSProviderCapabilities } from '@/lib/dns/providers';
+import type { DNSProviderCapabilities, DNSProviderType } from '@/lib/dns/types';
 import { withAuth } from '@/lib/auth';
 import { apiError, apiJson, apiOk, apiRouteError, readJsonBody } from '@/lib/api/response';
 
@@ -41,12 +43,22 @@ export async function PATCH(
       if (!row) {
         return apiError('not_found', 'DNS provider not found', 404);
       }
-      return apiJson(row);
+      return apiJson(withCapabilities(row));
     } catch (err) {
       console.error('Failed to update DNS provider:', err);
       return apiRouteError(err, 'Failed to update DNS provider');
     }
   });
+}
+
+function withCapabilities<T extends { type: string }>(
+  row: T
+): T & { capabilities: DNSProviderCapabilities | null } {
+  try {
+    return { ...row, capabilities: getDNSProviderCapabilities(row.type as DNSProviderType) };
+  } catch {
+    return { ...row, capabilities: null };
+  }
 }
 
 export async function DELETE(

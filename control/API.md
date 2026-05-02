@@ -55,6 +55,12 @@ provider credentials unreadable. `SESSION_SECRET` is accepted as a fallback for
 development, but production and shared debug environments should use a dedicated
 `ENCRYPTION_KEY`.
 
+Certificate records never return encrypted PEM or private key material from the
+API. `POST /api/certificates` stores the domain and DNS zone that will be used
+for ACME DNS-01 issuance. This keeps certificate issuance independent from a
+specific DNS provider; switching providers means importing the new zone and
+updating the certificate's `dnsZoneId` before the next renewal.
+
 ## Examples
 
 Create an Agent:
@@ -82,4 +88,13 @@ curl -X POST http://localhost:3000/api/tunnels \
   -H "Authorization: Bearer kmt_xxx" \
   -H "Content-Type: application/json" \
   -d '{"domain":"app.example.com","agentId":"AGENT_UUID","target":"localhost:8080"}'
+```
+
+Create a certificate inventory record:
+
+```bash
+curl -X POST http://localhost:3000/api/certificates \
+  -H "Authorization: Bearer kmt_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"domain":"app.example.com","dnsZoneId":"DNS_ZONE_UUID"}'
 ```

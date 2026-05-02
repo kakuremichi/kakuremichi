@@ -1,5 +1,6 @@
 import type {
   DNSProvider,
+  DNSProviderCapabilities,
   DNSProviderConfig,
   DNSRecord,
   DNSRecordType,
@@ -31,12 +32,26 @@ interface CloudflareRecord {
   proxied?: boolean;
 }
 
+export const cloudflareCapabilities: DNSProviderCapabilities = {
+  supportedRecordTypes: ['A', 'AAAA', 'CNAME', 'TXT'],
+  proxiedRecordTypes: ['A', 'AAAA', 'CNAME'],
+  supportsCredentialsValidation: true,
+  supportsZoneImport: true,
+};
+
 export class CloudflareDNSProvider implements DNSProvider {
   private readonly apiToken: string;
   private readonly baseUrl = 'https://api.cloudflare.com/client/v4';
 
   constructor(config: DNSProviderConfig) {
+    if (typeof config.apiToken !== 'string' || config.apiToken.trim() === '') {
+      throw new Error('Cloudflare API token is required');
+    }
     this.apiToken = config.apiToken;
+  }
+
+  getCapabilities(): DNSProviderCapabilities {
+    return cloudflareCapabilities;
   }
 
   async validateCredentials(): Promise<void> {
@@ -125,13 +140,22 @@ export class CloudflareDNSProvider implements DNSProvider {
 }
 
 function toCloudflareRecord(record: DesiredDNSRecord) {
-  return {
+  const payload: {
+    type: DNSRecordType;
+    name: string;
+    content: string;
+    ttl: number;
+    proxied?: boolean;
+  } = {
     type: record.type,
     name: record.name,
     content: record.content,
     ttl: record.ttl,
-    proxied: record.proxied,
   };
+  if (['A', 'AAAA', 'CNAME'].includes(record.type)) {
+    payload.proxied = record.proxied ?? false;
+  }
+  return payload;
 }
 
 function toDNSRecord(record: CloudflareRecord): DNSRecord {

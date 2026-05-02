@@ -3,13 +3,14 @@ import { desc } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, dnsProviders } from '@/lib/db';
 import { encryptJson } from '@/lib/dns/crypto';
-import { createDNSProvider } from '@/lib/dns/providers';
+import { createDNSProvider, getDNSProviderCapabilities } from '@/lib/dns/providers';
+import { DNS_PROVIDER_TYPES, type DNSProviderCapabilities, type DNSProviderType } from '@/lib/dns/types';
 import { withAuth } from '@/lib/auth';
 import { apiCreated, apiError, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
 
 const createProviderSchema = z.object({
   name: z.string().min(1).max(64),
-  type: z.literal('cloudflare'),
+  type: z.enum(DNS_PROVIDER_TYPES),
   apiToken: z.string().min(1),
 }).strict();
 
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
       })
       .from(dnsProviders)
       .orderBy(desc(dnsProviders.createdAt));
-    return apiJson(rows);
+    return apiJson(rows.map(withCapabilities));
   });
 }
 
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
           updatedAt: dnsProviders.updatedAt,
         });
 
-      return apiCreated(row);
+      return apiCreated(row ? withCapabilities(row) : row);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return apiRouteError(err, 'Failed to create DNS provider');
@@ -73,4 +74,14 @@ export async function POST(request: NextRequest) {
       );
     }
   });
+}
+
+function withCapabilities<T extends { type: string }>(
+  row: T
+): T & { capabilities: DNSProviderCapabilities | null } {
+  try {
+    return { ...row, capabilities: getDNSProviderCapabilities(row.type as DNSProviderType) };
+  } catch {
+    return { ...row, capabilities: null };
+  }
 }

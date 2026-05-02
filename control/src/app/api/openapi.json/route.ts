@@ -65,13 +65,41 @@ const tunnelSchema = {
   },
 };
 
+const certificateSchema = {
+  type: 'object',
+  required: ['id', 'domain', 'issuer', 'challengeType', 'status', 'createdAt', 'updatedAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    domain: { type: 'string' },
+    dnsZoneId: { type: ['string', 'null'], format: 'uuid' },
+    dnsZoneName: { type: ['string', 'null'] },
+    dnsProviderId: { type: ['string', 'null'], format: 'uuid' },
+    dnsProviderName: { type: ['string', 'null'] },
+    dnsProviderType: { type: ['string', 'null'] },
+    issuer: { type: 'string', enum: ['letsencrypt'] },
+    challengeType: { type: 'string', enum: ['dns-01'] },
+    status: {
+      type: 'string',
+      enum: ['pending', 'issuing', 'ready', 'renewal_due', 'error', 'disabled'],
+    },
+    notBefore: { type: ['string', 'null'], format: 'date-time' },
+    notAfter: { type: ['string', 'null'], format: 'date-time' },
+    renewAfter: { type: ['string', 'null'], format: 'date-time' },
+    fingerprintSha256: { type: ['string', 'null'] },
+    lastIssuedAt: { type: ['string', 'null'], format: 'date-time' },
+    lastError: { type: ['string', 'null'] },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
 const openApiDocument = {
   openapi: '3.1.0',
   info: {
     title: 'kakuremichi Control API',
     version: '0.1.0',
     description:
-      'External API for managing kakuremichi agents, gateways, tunnels, API tokens, and DNS sync.',
+      'External API for managing kakuremichi agents, gateways, tunnels, API tokens, DNS sync, and certificate inventory.',
   },
   servers: [{ url: '/' }],
   security: [{ bearerAuth: [] }, { cookieAuth: [] }],
@@ -107,6 +135,7 @@ const openApiDocument = {
       Agent: agentSchema,
       Gateway: gatewaySchema,
       Tunnel: tunnelSchema,
+      Certificate: certificateSchema,
       AgentCreate: {
         type: 'object',
         required: ['name'],
@@ -168,6 +197,24 @@ const openApiDocument = {
             items: { type: 'string', enum: ['read', 'write', 'admin'] },
           },
           expiresInDays: { type: 'integer', minimum: 1, maximum: 3650 },
+        },
+      },
+      CertificateCreate: {
+        type: 'object',
+        required: ['domain', 'dnsZoneId'],
+        additionalProperties: false,
+        properties: {
+          domain: {
+            type: 'string',
+            description: 'Domain or wildcard domain, for example app.example.com or *.example.com.',
+          },
+          dnsZoneId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'DNS zone used for ACME DNS-01 challenges.',
+          },
+          issuer: { type: 'string', enum: ['letsencrypt'], default: 'letsencrypt' },
+          challengeType: { type: 'string', enum: ['dns-01'], default: 'dns-01' },
         },
       },
       Ok: {
@@ -380,6 +427,48 @@ const openApiDocument = {
     },
     '/api/dns/sync': {
       post: { summary: 'Sync all DNS settings or one tunnel', responses: { '200': { description: 'DNS sync result' } } },
+    },
+    '/api/certificates': {
+      get: {
+        summary: 'List managed certificates',
+        responses: {
+          '200': {
+            description: 'Certificate list without private key material',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/Certificate' } },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: 'Create a certificate inventory record',
+        description:
+          'Creates the Control-side certificate record and binds it to a DNS zone for future DNS-01 issuance.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CertificateCreate' } } },
+        },
+        responses: { '201': { description: 'Certificate record created' } },
+      },
+    },
+    '/api/certificates/{id}': {
+      get: {
+        summary: 'Get a managed certificate',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Certificate without private key material' } },
+      },
+      patch: {
+        summary: 'Update certificate DNS zone or status',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Certificate updated' } },
+      },
+      delete: {
+        summary: 'Delete a certificate inventory record',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Certificate deleted' } },
+      },
     },
   },
 };
