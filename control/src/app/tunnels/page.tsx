@@ -995,7 +995,7 @@ export default function TunnelsPage() {
                   )}
                 </DetailSection>
 
-                <DetailSection title="Backends">
+                <DetailSection title="Backends" className="backends-section">
                   <BackendSettings
                     tunnel={selectedTunnel}
                     agents={agents}
@@ -1136,12 +1136,18 @@ function Topology({
         })}
       </div>
       <div className="topology-edge" />
+      <div className="topology-node balancer">
+        <span>Policy</span>
+        <strong>Weighted RR</strong>
+        <small>priority, drain, health</small>
+      </div>
+      <div className="topology-edge" />
       <div className="topology-backend-stack">
         {backendNodes.map(backend => (
           <div key={backend.id} className={backend.enabled && !backend.draining ? 'topology-node agent' : 'topology-node agent muted'}>
-            <span>{getBackendAgentName(backend)}</span>
+            <span>{getBackendAgentName(backend)} {'->'} {backend.target}</span>
             <strong>{backend.agentIp}</strong>
-            <small>{backend.target} / w{backend.weight} / p{backend.priority} / {getBackendAgentStatus(backend)}</small>
+            <small>w{backend.weight} / p{backend.priority} / {backend.draining ? 'drain' : getBackendAgentStatus(backend)}</small>
           </div>
         ))}
       </div>
@@ -1149,9 +1155,9 @@ function Topology({
   )
 }
 
-function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+function DetailSection({ title, children, className = '' }: { title: string; children: ReactNode; className?: string }) {
   return (
-    <section className="detail-section">
+    <section className={className ? `detail-section ${className}` : 'detail-section'}>
       <h3>{title}</h3>
       {children}
     </section>

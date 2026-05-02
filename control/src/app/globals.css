@@ -805,6 +805,7 @@ ul {
 }
 
 .tunnel-detail-panel {
+  container-type: inline-size;
   padding: 1rem;
 }
 
@@ -823,7 +824,7 @@ ul {
 
 .topology-map {
   display: grid;
-  grid-template-columns: minmax(128px, 0.9fr) 34px minmax(150px, 1fr) 34px minmax(128px, 0.9fr) 34px minmax(128px, 0.9fr);
+  grid-template-columns: minmax(130px, 0.9fr) 32px minmax(150px, 1fr) 32px minmax(120px, 0.75fr) 32px minmax(180px, 1.25fr);
   align-items: center;
   gap: 0.35rem;
   border: 1px solid var(--line);
@@ -860,6 +861,12 @@ ul {
   line-height: 1.25;
 }
 
+.topology-backend-stack .topology-node span,
+.topology-backend-stack .topology-node small {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .topology-node.source {
   border-color: #bfdbfe;
   background: #eff6ff;
@@ -868,6 +875,11 @@ ul {
 .topology-node.gateway {
   border-color: #99f6e4;
   background: #f0fdfa;
+}
+
+.topology-node.balancer {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
 }
 
 .topology-node.agent {
@@ -910,6 +922,26 @@ ul {
   transform: translateY(-50%) rotate(45deg);
 }
 
+@container (max-width: 920px) {
+  .topology-map {
+    grid-template-columns: 1fr;
+  }
+
+  .topology-edge {
+    width: 2px;
+    height: 24px;
+    min-width: 0;
+    justify-self: center;
+  }
+
+  .topology-edge::after {
+    top: auto;
+    right: 50%;
+    bottom: -1px;
+    transform: translateX(50%) rotate(135deg);
+  }
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -927,6 +959,10 @@ ul {
 
 .detail-section h3 {
   margin-bottom: 0.75rem;
+}
+
+.detail-section.backends-section {
+  grid-column: 1 / -1;
 }
 
 .key-value {
@@ -1035,7 +1071,7 @@ ul {
 
 .backend-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.25fr) minmax(210px, 1fr) auto;
   gap: 0.65rem;
   align-items: center;
   border: 1px solid var(--line);
@@ -1074,7 +1110,7 @@ ul {
 
 .backend-form {
   display: grid;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(160px, 1.3fr) 76px 76px auto auto auto;
+  grid-template-columns: minmax(140px, 1fr) minmax(220px, 2fr) minmax(76px, 0.45fr) minmax(76px, 0.45fr);
   gap: 0.45rem;
   align-items: center;
   grid-column: 1 / -1;
@@ -1088,6 +1124,11 @@ ul {
 .compact-check {
   width: max-content;
   white-space: nowrap;
+}
+
+.backend-form .target-edit-actions {
+  grid-column: 3 / -1;
+  justify-content: flex-end;
 }
 
 .detail-error {
@@ -1168,6 +1209,11 @@ ul {
   }
 
   .backend-actions {
+    justify-content: flex-start;
+  }
+
+  .backend-form .target-edit-actions {
+    grid-column: auto;
     justify-content: flex-start;
   }
 
