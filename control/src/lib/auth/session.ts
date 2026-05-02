@@ -18,13 +18,17 @@ function getSessionSecret(): string {
 }
 
 export function sessionOptions(): SessionOptions {
+  const secureCookie = process.env.SESSION_COOKIE_SECURE
+    ? process.env.SESSION_COOKIE_SECURE === 'true'
+    : process.env.NODE_ENV === 'production';
+
   return {
     password: getSessionSecret(),
     cookieName: 'kakuremichi_session',
     cookieOptions: {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      secure: secureCookie,
       path: '/',
       maxAge: 60 * 60 * 24 * 7,
     },
