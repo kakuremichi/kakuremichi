@@ -87,6 +87,7 @@ function AuthBadge({ user }: { user: AuthUser }) {
   }
   return (
     <div
+      className="auth-badge"
       style={{
         display: 'flex',
         justifyContent: 'flex-end',

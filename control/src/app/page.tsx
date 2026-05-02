@@ -36,10 +36,13 @@ export default async function Home() {
 
   return (
     <div>
-      <h1>Dashboard</h1>
-      <p style={{ marginBottom: '2rem', color: '#666' }}>
-        Welcome to kakuremichi - Self-hosted tunnel-based reverse proxy
-      </p>
+      <div className="page-heading">
+        <p className="eyebrow">Overview</p>
+        <h1>Dashboard</h1>
+        <p className="page-subtitle">
+          Monitor agents, gateways, public routes, and supporting control-plane services.
+        </p>
+      </div>
 
       <div className="stats">
         <div className="stat-card">
@@ -69,11 +72,11 @@ export default async function Home() {
 
       <div className="card">
         <h2>System Status</h2>
-        <p style={{ color: '#047857', fontWeight: 600 }}>All systems operational</p>
-        <p style={{ marginTop: '1rem', fontSize: '0.875rem', color: '#666' }}>
+        <p className="health-line">All systems operational</p>
+        <p className="muted-line">
           Phase 1 Implementation Complete
         </p>
-        <ul style={{ marginTop: '1rem', marginLeft: '1.5rem' }}>
+        <ul className="system-list">
           <li>REST API - Active</li>
           <li>WebSocket Server - Running on port 3001</li>
           <li>Database - SQLite</li>
@@ -83,7 +86,7 @@ export default async function Home() {
 
       <div className="card">
         <h2>Quick Actions</h2>
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+        <div className="quick-actions">
           <a href="/agents"><button>Manage Agents</button></a>
           <a href="/gateways"><button>Manage Gateways</button></a>
           <a href="/tunnels"><button>Manage Tunnels</button></a>
