@@ -1,4 +1,4 @@
-import { db, tunnels, gateways, tunnelGatewayIps } from '../db';
+import { db, tunnels, gateways, tunnelGatewayIps, tunnelBackends } from '../db';
 import { eq, isNotNull, and } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 
@@ -58,6 +58,62 @@ export async function allocateTunnelSubnet(): Promise<TunnelSubnetAllocation> {
 }
 
 /**
+ * Allocate an Agent backend IP for a tunnel from the front (.2, .3, ...).
+ * Gateway IPs are allocated from the back of the same subnet.
+ */
+export function allocateTunnelBackendIpSync(
+  tx: SubnetAllocator,
+  tunnelId: string,
+  subnet: string
+): string {
+  const subnetMatch = subnet.match(/^(\d+\.\d+\.\d+)\.\d+\/24$/);
+  if (!subnetMatch) {
+    throw new Error(`Invalid subnet format: ${subnet}`);
+  }
+  const subnetPrefix = subnetMatch[1];
+
+  const existingBackends = tx
+    .select({ agentIp: tunnelBackends.agentIp })
+    .from(tunnelBackends)
+    .where(eq(tunnelBackends.tunnelId, tunnelId))
+    .all();
+
+  const existingGatewayIps = tx
+    .select({ ip: tunnelGatewayIps.ip })
+    .from(tunnelGatewayIps)
+    .where(eq(tunnelGatewayIps.tunnelId, tunnelId))
+    .all();
+
+  const usedLastOctets = new Set<number>();
+  for (const row of existingBackends) {
+    const match = row.agentIp.match(/\.(\d+)$/);
+    if (match?.[1]) {
+      usedLastOctets.add(parseInt(match[1], 10));
+    }
+  }
+  for (const row of existingGatewayIps) {
+    const match = row.ip.match(/\.(\d+)$/);
+    if (match?.[1]) {
+      usedLastOctets.add(parseInt(match[1], 10));
+    }
+  }
+
+  let nextOctet = 2;
+  while (usedLastOctets.has(nextOctet) && nextOctet < 254) {
+    nextOctet++;
+  }
+  if (nextOctet >= 254) {
+    throw new Error('No more backend IPs available for this tunnel');
+  }
+
+  return `${subnetPrefix}.${nextOctet}`;
+}
+
+export async function allocateTunnelBackendIp(tunnelId: string, subnet: string): Promise<string> {
+  return allocateTunnelBackendIpSync(db as unknown as SubnetAllocator, tunnelId, subnet);
+}
+
+/**
  * Allocate Gateway IPs for a tunnel from the back (.254, .253, ...)
  * @param tunnelId The tunnel to allocate IPs for
  * @param subnet The tunnel's subnet (e.g., "10.1.0.0/24")
@@ -91,6 +147,16 @@ export async function allocateGatewayIpsForTunnel(
     const match = e.ip.match(/\.(\d+)$/);
     return match && match[1] ? parseInt(match[1], 10) : 0;
   }));
+  const existingBackends = await db
+    .select({ agentIp: tunnelBackends.agentIp })
+    .from(tunnelBackends)
+    .where(eq(tunnelBackends.tunnelId, tunnelId));
+  for (const backend of existingBackends) {
+    const match = backend.agentIp.match(/\.(\d+)$/);
+    if (match?.[1]) {
+      usedLastOctets.add(parseInt(match[1], 10));
+    }
+  }
 
   // Allocate IPs for gateways that don't have one yet
   const allocations: Array<{ gatewayId: string; ip: string }> = [];
@@ -174,6 +240,16 @@ export async function allocateTunnelIpsForGateway(
       const match = e.ip.match(/\.(\d+)$/);
       return match && match[1] ? parseInt(match[1], 10) : 0;
     }));
+    const existingBackends = await db
+      .select({ agentIp: tunnelBackends.agentIp })
+      .from(tunnelBackends)
+      .where(eq(tunnelBackends.tunnelId, tunnel.id));
+    for (const backend of existingBackends) {
+      const match = backend.agentIp.match(/\.(\d+)$/);
+      if (match?.[1]) {
+        usedLastOctets.add(parseInt(match[1], 10));
+      }
+    }
 
     // Find next available octet from back
     let nextOctet = 254;

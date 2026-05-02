@@ -92,7 +92,7 @@ Create a Tunnel:
 curl -X POST http://localhost:3000/api/tunnels \
   -H "Authorization: Bearer kmt_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"domain":"app.example.com","agentId":"AGENT_UUID","target":"localhost:8080"}'
+  -d '{"domain":"app.example.com","backends":[{"agentId":"AGENT_UUID","target":"localhost:8080","weight":100,"priority":0}]}'
 ```
 
 Create a Tunnel with Control-managed TLS:
@@ -101,7 +101,25 @@ Create a Tunnel with Control-managed TLS:
 curl -X POST http://localhost:3000/api/tunnels \
   -H "Authorization: Bearer kmt_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"domain":"app.example.com","agentId":"AGENT_UUID","target":"localhost:8080","tls":{"mode":"auto","dnsZoneId":"DNS_ZONE_UUID","forceHttps":true}}'
+  -d '{"domain":"app.example.com","backends":[{"agentId":"AGENT_UUID","target":"localhost:8080"}],"tls":{"mode":"auto","dnsZoneId":"DNS_ZONE_UUID","forceHttps":true}}'
+```
+
+Add a backend to an existing Tunnel:
+
+```bash
+curl -X POST http://localhost:3000/api/tunnels/TUNNEL_UUID/backends \
+  -H "Authorization: Bearer kmt_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"SECOND_AGENT_UUID","target":"localhost:8080","weight":50,"priority":0}'
+```
+
+Drain or reweight a backend:
+
+```bash
+curl -X PATCH http://localhost:3000/api/tunnels/TUNNEL_UUID/backends/BACKEND_UUID \
+  -H "Authorization: Bearer kmt_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"draining":true,"weight":10}'
 ```
 
 Create a certificate inventory record:

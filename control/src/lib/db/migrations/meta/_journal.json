@@ -85,6 +85,13 @@
       "when": 1777721651110,
       "tag": "0011_cuddly_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1777733679378,
+      "tag": "0012_stale_ezekiel_stane",
+      "breakpoints": true
     }
   ]
 }

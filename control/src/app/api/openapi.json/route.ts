@@ -48,18 +48,22 @@ const gatewaySchema = {
 
 const tunnelSchema = {
   type: 'object',
-  required: ['id', 'domain', 'agentId', 'target', 'enabled', 'createdAt', 'updatedAt'],
+  required: ['id', 'domain', 'enabled', 'backends', 'createdAt', 'updatedAt'],
   properties: {
     id: { type: 'string', format: 'uuid' },
     domain: { type: 'string' },
-    agentId: { type: 'string', format: 'uuid' },
-    target: { type: 'string', description: 'Origin target in host:port format.' },
+    agentId: { type: 'string', format: 'uuid', deprecated: true },
+    target: { type: 'string', description: 'Primary origin target in host:port format.', deprecated: true },
     enabled: { type: 'boolean' },
     description: { type: ['string', 'null'] },
     subnet: { type: ['string', 'null'] },
     agentIp: { type: ['string', 'null'] },
     httpProxyEnabled: { type: 'boolean' },
     socksProxyEnabled: { type: 'boolean' },
+    backends: {
+      type: 'array',
+      items: { $ref: '#/components/schemas/TunnelBackend' },
+    },
     tls: {
       type: 'object',
       properties: {
@@ -70,6 +74,51 @@ const tunnelSchema = {
     },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
+const tunnelBackendSchema = {
+  type: 'object',
+  required: ['id', 'tunnelId', 'agentId', 'target', 'enabled', 'draining', 'weight', 'priority', 'agentIp'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    tunnelId: { type: 'string', format: 'uuid' },
+    agentId: { type: 'string', format: 'uuid' },
+    target: { type: 'string', description: 'Origin target in host:port format.' },
+    enabled: { type: 'boolean' },
+    draining: { type: 'boolean' },
+    weight: { type: 'integer', minimum: 1, maximum: 10000, default: 100 },
+    priority: { type: 'integer', minimum: 0, maximum: 1000, default: 0 },
+    agentIp: { type: 'string', format: 'ipv4' },
+    status: { type: 'string', enum: ['unknown', 'healthy', 'unhealthy', 'draining'] },
+    lastError: { type: ['string', 'null'] },
+    agent: {
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            name: { type: 'string' },
+            status: { type: 'string' },
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+  },
+};
+
+const tunnelBackendCreateSchema = {
+  type: 'object',
+  required: ['agentId', 'target'],
+  additionalProperties: false,
+  properties: {
+    agentId: { type: 'string', format: 'uuid' },
+    target: { type: 'string', description: 'host:port, for example localhost:8080' },
+    enabled: { type: 'boolean', default: true },
+    draining: { type: 'boolean', default: false },
+    weight: { type: 'integer', minimum: 1, maximum: 10000, default: 100 },
+    priority: { type: 'integer', minimum: 0, maximum: 1000, default: 0 },
   },
 };
 
@@ -143,6 +192,7 @@ const openApiDocument = {
       Agent: agentSchema,
       Gateway: gatewaySchema,
       Tunnel: tunnelSchema,
+      TunnelBackend: tunnelBackendSchema,
       Certificate: certificateSchema,
       AgentCreate: {
         type: 'object',
@@ -166,12 +216,18 @@ const openApiDocument = {
       },
       TunnelCreate: {
         type: 'object',
-        required: ['domain', 'agentId', 'target'],
+        required: ['domain', 'backends'],
         additionalProperties: false,
         properties: {
           domain: { type: 'string' },
-          agentId: { type: 'string', format: 'uuid' },
-          target: { type: 'string', description: 'host:port, for example localhost:8080' },
+          agentId: { type: 'string', format: 'uuid', deprecated: true },
+          target: { type: 'string', description: 'host:port legacy primary backend.', deprecated: true },
+          backends: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 64,
+            items: { $ref: '#/components/schemas/TunnelBackendCreate' },
+          },
           description: { type: 'string' },
           httpProxyEnabled: { type: 'boolean', default: false },
           socksProxyEnabled: { type: 'boolean', default: false },
@@ -202,6 +258,11 @@ const openApiDocument = {
             },
           },
         },
+      },
+      TunnelBackendCreate: tunnelBackendCreateSchema,
+      TunnelBackendUpdate: {
+        ...tunnelBackendCreateSchema,
+        required: [],
       },
       ApiTokenCreate: {
         type: 'object',
@@ -415,6 +476,53 @@ const openApiDocument = {
         summary: 'Delete a tunnel',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: { '200': { description: 'Tunnel deleted' } },
+      },
+    },
+    '/api/tunnels/{id}/backends': {
+      get: {
+        summary: 'List tunnel backends',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Backend list',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/TunnelBackend' } },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: 'Add a tunnel backend',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/TunnelBackendCreate' } } },
+        },
+        responses: { '201': { description: 'Created backend' } },
+      },
+    },
+    '/api/tunnels/{id}/backends/{backendId}': {
+      patch: {
+        summary: 'Update a tunnel backend',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'backendId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/TunnelBackendUpdate' } } },
+        },
+        responses: { '200': { description: 'Updated backend' } },
+      },
+      delete: {
+        summary: 'Delete a tunnel backend',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'backendId', in: 'path', required: true, schema: { type: 'string' } },
+        ],
+        responses: { '200': { description: 'Backend deleted' } },
       },
     },
     '/api/dns/zones': {

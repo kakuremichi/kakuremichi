@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import {
   db,
   tunnels,
+  tunnelBackends,
   agents,
   tunnelGatewayIps,
   gateways,
@@ -12,7 +13,12 @@ import {
   tunnelTlsSettings,
 } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
-import { createTunnelSchema, allocateTunnelSubnetSync, allocateGatewayIpsForTunnel } from '@/lib/utils';
+import {
+  createTunnelSchema,
+  allocateTunnelSubnetSync,
+  allocateGatewayIpsForTunnel,
+  allocateTunnelBackendIpSync,
+} from '@/lib/utils';
 import { syncTunnelDns } from '@/lib/dns/sync';
 import { configureTunnelTls } from '@/lib/certificates/tunnel-tls';
 import { eq } from 'drizzle-orm';
@@ -67,6 +73,38 @@ export async function GET(request: NextRequest) {
         });
       }
 
+      const allBackends = await db
+        .select({
+          id: tunnelBackends.id,
+          tunnelId: tunnelBackends.tunnelId,
+          agentId: tunnelBackends.agentId,
+          target: tunnelBackends.target,
+          enabled: tunnelBackends.enabled,
+          draining: tunnelBackends.draining,
+          weight: tunnelBackends.weight,
+          priority: tunnelBackends.priority,
+          agentIp: tunnelBackends.agentIp,
+          status: tunnelBackends.status,
+          lastError: tunnelBackends.lastError,
+          createdAt: tunnelBackends.createdAt,
+          updatedAt: tunnelBackends.updatedAt,
+          agent: {
+            id: agents.id,
+            name: agents.name,
+            status: agents.status,
+          },
+        })
+        .from(tunnelBackends)
+        .leftJoin(agents, eq(tunnelBackends.agentId, agents.id));
+
+      const backendsByTunnel = new Map<string, typeof allBackends>();
+      for (const backend of allBackends) {
+        if (!backendsByTunnel.has(backend.tunnelId)) {
+          backendsByTunnel.set(backend.tunnelId, []);
+        }
+        backendsByTunnel.get(backend.tunnelId)!.push(backend);
+      }
+
       const allDnsSettings = await db
         .select({
           tunnelId: dnsSyncSettings.tunnelId,
@@ -116,6 +154,7 @@ export async function GET(request: NextRequest) {
 
       const tunnelsWithGatewayIps = allTunnels.map(tunnel => ({
         ...tunnel,
+        backends: backendsByTunnel.get(tunnel.id) || [],
         gatewayIps: gatewayIpsByTunnel.get(tunnel.id) || [],
         dnsSync: dnsSyncByTunnel.get(tunnel.id) || null,
         tls: tlsByTunnel.get(tunnel.id) || {
@@ -139,6 +178,14 @@ export async function POST(request: NextRequest) {
     try {
       const body = await readJsonBody(request);
       const validatedData = createTunnelSchema.parse(body);
+      const backendInputs = validatedData.backends ?? [{
+        agentId: validatedData.agentId!,
+        target: validatedData.target!,
+        enabled: true,
+        draining: false,
+        weight: 100,
+        priority: 0,
+      }];
 
       if (validatedData.dnsSync?.enabled) {
         const zone = await db
@@ -152,24 +199,25 @@ export async function POST(request: NextRequest) {
       }
 
       const result = db.transaction((tx) => {
-        const agentRow = tx
+        const existingAgents = tx
           .select({ id: agents.id })
           .from(agents)
-          .where(eq(agents.id, validatedData.agentId))
-          .limit(1)
           .all();
-        if (agentRow.length === 0) {
-          return { agentMissing: true as const };
+        const existingAgentIds = new Set(existingAgents.map((agent) => agent.id));
+        const missingAgentId = backendInputs.find((backend) => !existingAgentIds.has(backend.agentId))?.agentId;
+        if (missingAgentId) {
+          return { agentMissing: true as const, agentId: missingAgentId };
         }
 
         const subnetAllocation = allocateTunnelSubnetSync(tx);
+        const primaryBackend = backendInputs[0]!;
 
         const inserted = tx
           .insert(tunnels)
           .values({
             domain: validatedData.domain,
-            agentId: validatedData.agentId,
-            target: validatedData.target,
+            agentId: primaryBackend.agentId,
+            target: primaryBackend.target,
             description: validatedData.description,
             enabled: true,
             subnet: subnetAllocation.subnet,
@@ -179,6 +227,25 @@ export async function POST(request: NextRequest) {
           })
           .returning()
           .get();
+
+        for (let index = 0; index < backendInputs.length; index++) {
+          const backend = backendInputs[index]!;
+          const agentIp = index === 0
+            ? subnetAllocation.agentIp
+            : allocateTunnelBackendIpSync(tx, inserted.id, subnetAllocation.subnet);
+          tx.insert(tunnelBackends)
+            .values({
+              tunnelId: inserted.id,
+              agentId: backend.agentId,
+              target: backend.target,
+              enabled: backend.enabled,
+              draining: backend.draining,
+              weight: backend.weight,
+              priority: backend.priority,
+              agentIp,
+            })
+            .run();
+        }
 
         if (validatedData.dnsSync?.enabled) {
           tx.insert(dnsSyncSettings)
@@ -198,7 +265,7 @@ export async function POST(request: NextRequest) {
       });
 
       if ('agentMissing' in result) {
-        return apiError('not_found', 'Agent not found', 404);
+        return apiError('not_found', `Agent not found: ${result.agentId}`, 404);
       }
       const createdTunnel = result.tunnel;
       if (createdTunnel) {
@@ -219,9 +286,7 @@ export async function POST(request: NextRequest) {
         const wsServer = getWebSocketServer();
         if (wsServer) {
           await wsServer.broadcastGatewayConfig();
-          if (createdTunnel?.agentId) {
-            await wsServer.broadcastAgentConfig(createdTunnel.agentId);
-          }
+          await wsServer.broadcastAllAgentConfigs();
         } else {
           console.warn('WebSocket server not initialized, cannot broadcast config');
         }

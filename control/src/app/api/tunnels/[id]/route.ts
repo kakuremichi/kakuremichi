@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { db, tunnels, tunnelTlsSettings, certificates } from '@/lib/db';
+import { db, tunnels, tunnelBackends, tunnelTlsSettings, certificates, agents } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
 import { deleteTunnelDnsRecords, syncTunnelDns } from '@/lib/dns/sync';
 import { configureTunnelTls } from '@/lib/certificates/tunnel-tls';
@@ -21,7 +21,8 @@ export async function GET(
         return apiError('not_found', 'Tunnel not found', 404);
       }
       const tls = await getTunnelTls(id);
-      return apiJson({ ...foundTunnel, tls });
+      const backends = await getTunnelBackends(id);
+      return apiJson({ ...foundTunnel, backends, tls });
     } catch (error) {
       console.error('Failed to fetch tunnel:', error);
       return apiRouteError(error, 'Failed to fetch tunnel');
@@ -38,11 +39,11 @@ export async function PATCH(
       const { id } = await params;
       const body = await readJsonBody(request);
       const validatedData = updateTunnelSchema.parse(body);
-      const { tls, ...tunnelData } = validatedData;
+      const { tls, target, ...tunnelData } = validatedData;
 
       const updated = await db
         .update(tunnels)
-        .set({ ...tunnelData, updatedAt: new Date() })
+        .set({ ...tunnelData, ...(target ? { target } : {}), updatedAt: new Date() })
         .where(eq(tunnels.id, id))
         .returning();
 
@@ -52,6 +53,19 @@ export async function PATCH(
       }
       if (tls) {
         await configureTunnelTls(updatedTunnel.id, tls);
+      }
+      if (target) {
+        const [primaryBackend] = await db
+          .select({ id: tunnelBackends.id })
+          .from(tunnelBackends)
+          .where(eq(tunnelBackends.tunnelId, updatedTunnel.id))
+          .limit(1);
+        if (primaryBackend) {
+          await db
+            .update(tunnelBackends)
+            .set({ target, updatedAt: new Date() })
+            .where(eq(tunnelBackends.id, primaryBackend.id));
+        }
       }
 
       try {
@@ -64,15 +78,17 @@ export async function PATCH(
         const wsServer = getWebSocketServer();
         if (wsServer) {
           await wsServer.broadcastGatewayConfig();
-          if (updatedTunnel.agentId) {
-            await wsServer.broadcastAgentConfig(updatedTunnel.agentId);
-          }
+          await wsServer.broadcastAllAgentConfigs();
         }
       } catch (err) {
         console.error('Failed to broadcast tunnel update config:', err);
       }
 
-      return apiJson({ ...updatedTunnel, tls: await getTunnelTls(updatedTunnel.id) });
+      return apiJson({
+        ...updatedTunnel,
+        backends: await getTunnelBackends(updatedTunnel.id),
+        tls: await getTunnelTls(updatedTunnel.id),
+      });
     } catch (error) {
       console.error('Failed to update tunnel:', error);
       return apiRouteError(error, 'Failed to update tunnel');
@@ -110,6 +126,33 @@ async function getTunnelTls(tunnelId: string) {
   };
 }
 
+async function getTunnelBackends(tunnelId: string) {
+  return db
+    .select({
+      id: tunnelBackends.id,
+      tunnelId: tunnelBackends.tunnelId,
+      agentId: tunnelBackends.agentId,
+      target: tunnelBackends.target,
+      enabled: tunnelBackends.enabled,
+      draining: tunnelBackends.draining,
+      weight: tunnelBackends.weight,
+      priority: tunnelBackends.priority,
+      agentIp: tunnelBackends.agentIp,
+      status: tunnelBackends.status,
+      lastError: tunnelBackends.lastError,
+      createdAt: tunnelBackends.createdAt,
+      updatedAt: tunnelBackends.updatedAt,
+      agent: {
+        id: agents.id,
+        name: agents.name,
+        status: agents.status,
+      },
+    })
+    .from(tunnelBackends)
+    .leftJoin(agents, eq(tunnelBackends.agentId, agents.id))
+    .where(eq(tunnelBackends.tunnelId, tunnelId));
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -132,9 +175,7 @@ export async function DELETE(
         const wsServer = getWebSocketServer();
         if (wsServer) {
           await wsServer.broadcastGatewayConfig();
-          if (deletedTunnel.agentId) {
-            await wsServer.broadcastAgentConfig(deletedTunnel.agentId);
-          }
+          await wsServer.broadcastAllAgentConfigs();
         }
       } catch (err) {
         console.error('Failed to broadcast tunnel delete config:', err);

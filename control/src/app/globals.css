@@ -875,12 +875,17 @@ ul {
   background: #f0fdf4;
 }
 
+.topology-node.muted {
+  opacity: 0.72;
+}
+
 .topology-node.target {
   border-color: #fed7aa;
   background: #fff7ed;
 }
 
-.topology-gateway-stack {
+.topology-gateway-stack,
+.topology-backend-stack {
   display: grid;
   gap: 0.5rem;
   min-width: 0;
@@ -1008,6 +1013,83 @@ ul {
   white-space: nowrap;
 }
 
+.backend-settings {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.backend-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.backend-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.backend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.65rem;
+}
+
+.backend-main {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.backend-main span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.backend-main strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.backend-meta,
+.backend-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.backend-actions {
+  justify-content: flex-end;
+}
+
+.backend-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(160px, 1.3fr) 76px 76px auto auto auto;
+  gap: 0.45rem;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.backend-form input,
+.backend-form select {
+  min-height: 2.1rem;
+}
+
+.compact-check {
+  width: max-content;
+  white-space: nowrap;
+}
+
 .detail-error {
   margin-top: 0.5rem;
   border-radius: 7px;
@@ -1078,6 +1160,15 @@ ul {
   .tunnel-list-panel {
     position: static;
     max-height: none;
+  }
+
+  .backend-row,
+  .backend-form {
+    grid-template-columns: 1fr;
+  }
+
+  .backend-actions {
+    justify-content: flex-start;
   }
 
   .topology-map {

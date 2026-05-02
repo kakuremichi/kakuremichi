@@ -121,6 +121,19 @@ export const PROXY_PORTS = {
   SOCKS5: 1080,
 } as const;
 
+export interface TunnelBackendConfig {
+  id: string;
+  tunnelId: string;
+  agentId: string;
+  target: string;
+  enabled: boolean;
+  draining: boolean;
+  weight: number;
+  priority: number;
+  agentIp: string;
+  agentStatus?: string;
+}
+
 /**
  * Gateway configuration
  */
@@ -134,7 +147,7 @@ export interface GatewayConfig {
     virtualIp: string;
   }>;
   tunnels: Array<Tunnel & {
-    agentId: string;
+    backends: TunnelBackendConfig[];
     tlsMode: 'disabled' | 'auto' | 'gateway_acme';
     certificateId: string | null;
     forceHttps: boolean;
@@ -163,7 +176,9 @@ export interface AgentConfig {
     wireguardPublicKey: string;
     publicIp: string;
   }>;
-  tunnels: Array<Tunnel>;
+  tunnels: Array<Tunnel & {
+    backends: TunnelBackendConfig[];
+  }>;
   // Exit Node proxy configuration
   proxyConfig: {
     httpProxyPort: number;

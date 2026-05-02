@@ -22,6 +22,7 @@ interface Tunnel {
   enabled: boolean
   subnet: string | null
   agentIp: string | null
+  backends: TunnelBackend[]
   gatewayIps: GatewayIP[]
   httpProxyEnabled: boolean
   socksProxyEnabled: boolean
@@ -59,6 +60,25 @@ interface Tunnel {
   }
   createdAt: string
   updatedAt: string
+}
+
+interface TunnelBackend {
+  id: string
+  tunnelId: string
+  agentId: string
+  target: string
+  enabled: boolean
+  draining: boolean
+  weight: number
+  priority: number
+  agentIp: string
+  status: string
+  lastError: string | null
+  agent?: {
+    id: string
+    name: string
+    status: string
+  } | null
 }
 
 interface Agent {
@@ -102,6 +122,18 @@ export default function TunnelsPage() {
   })
   const [exitSaving, setExitSaving] = useState(false)
   const [exitError, setExitError] = useState('')
+  const [showBackendForm, setShowBackendForm] = useState(false)
+  const [editingBackendId, setEditingBackendId] = useState<string | null>(null)
+  const [backendSaving, setBackendSaving] = useState(false)
+  const [backendError, setBackendError] = useState('')
+  const [backendDraft, setBackendDraft] = useState({
+    agentId: '',
+    target: '',
+    enabled: true,
+    draining: false,
+    weight: '100',
+    priority: '0',
+  })
   const [formData, setFormData] = useState({
     domain: '',
     target: '',
@@ -279,6 +311,8 @@ export default function TunnelsPage() {
     setTargetError('')
     setEditingExitId(null)
     setExitError('')
+    cancelBackendEdit()
+    setShowBackendForm(false)
   }
 
   function startTargetEdit(tunnel: Tunnel) {
@@ -310,6 +344,51 @@ export default function TunnelsPage() {
     setEditingExitId(null)
     setExitDraft({ httpProxyEnabled: false, socksProxyEnabled: false })
     setExitError('')
+  }
+
+  function resetBackendDraft() {
+    setBackendDraft({
+      agentId: '',
+      target: '',
+      enabled: true,
+      draining: false,
+      weight: '100',
+      priority: '0',
+    })
+  }
+
+  function startBackendAdd() {
+    setEditingTargetId(null)
+    setEditingExitId(null)
+    setBackendError('')
+    resetBackendDraft()
+    setShowBackendForm(true)
+  }
+
+  function startBackendEdit(backend: TunnelBackend) {
+    setShowBackendForm(false)
+    setBackendError('')
+    setEditingBackendId(backend.id)
+    setBackendDraft({
+      agentId: backend.agentId,
+      target: backend.target,
+      enabled: backend.enabled,
+      draining: backend.draining,
+      weight: String(backend.weight),
+      priority: String(backend.priority),
+    })
+  }
+
+  function cancelBackendEdit() {
+    setEditingBackendId(null)
+    setBackendError('')
+    resetBackendDraft()
+  }
+
+  function cancelBackendAdd() {
+    setShowBackendForm(false)
+    setBackendError('')
+    resetBackendDraft()
   }
 
   async function updateTunnelTarget(tunnel: Tunnel) {
@@ -374,6 +453,97 @@ export default function TunnelsPage() {
       setExitError(err instanceof Error ? err.message : 'Failed to update exit node')
     } finally {
       setExitSaving(false)
+    }
+  }
+
+  function backendPayload() {
+    return {
+      agentId: backendDraft.agentId,
+      target: backendDraft.target.trim(),
+      enabled: backendDraft.enabled,
+      draining: backendDraft.draining,
+      weight: Number(backendDraft.weight || 100),
+      priority: Number(backendDraft.priority || 0),
+    }
+  }
+
+  async function createBackend(tunnel: Tunnel) {
+    const payload = backendPayload()
+    if (!payload.agentId || !payload.target) {
+      setBackendError('Agent and target are required')
+      return
+    }
+
+    setBackendSaving(true)
+    setBackendError('')
+    try {
+      const res = await fetch(`/api/tunnels/${tunnel.id}/backends`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const detail = Array.isArray(data.details) ? data.details[0]?.message : null
+        throw new Error(detail || data.error || 'Failed to add backend')
+      }
+      cancelBackendAdd()
+      fetchData()
+    } catch (err) {
+      setBackendError(err instanceof Error ? err.message : 'Failed to add backend')
+    } finally {
+      setBackendSaving(false)
+    }
+  }
+
+  async function updateBackend(tunnel: Tunnel, backend: TunnelBackend) {
+    const payload = backendPayload()
+    if (!payload.agentId || !payload.target) {
+      setBackendError('Agent and target are required')
+      return
+    }
+
+    setBackendSaving(true)
+    setBackendError('')
+    try {
+      const res = await fetch(`/api/tunnels/${tunnel.id}/backends/${backend.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const detail = Array.isArray(data.details) ? data.details[0]?.message : null
+        throw new Error(detail || data.error || 'Failed to update backend')
+      }
+      cancelBackendEdit()
+      fetchData()
+    } catch (err) {
+      setBackendError(err instanceof Error ? err.message : 'Failed to update backend')
+    } finally {
+      setBackendSaving(false)
+    }
+  }
+
+  async function deleteBackend(tunnel: Tunnel, backend: TunnelBackend) {
+    if (!confirm(`Delete backend ${backend.agentIp} -> ${backend.target}?`)) return
+
+    setBackendSaving(true)
+    setBackendError('')
+    try {
+      const res = await fetch(`/api/tunnels/${tunnel.id}/backends/${backend.id}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to delete backend')
+      }
+      cancelBackendEdit()
+      fetchData()
+    } catch (err) {
+      setBackendError(err instanceof Error ? err.message : 'Failed to delete backend')
+    } finally {
+      setBackendSaving(false)
     }
   }
 
@@ -473,13 +643,27 @@ export default function TunnelsPage() {
   }
 
   function getAgentName(tunnel: Tunnel) {
-    const agent = agents.find(a => a.id === tunnel.agentId)
-    return tunnel.agent?.name || agent?.name || 'Unknown'
+    const backend = tunnel.backends?.[0]
+    const agentId = backend?.agentId || tunnel.agentId
+    const agent = agents.find(a => a.id === agentId)
+    return backend?.agent?.name || tunnel.agent?.name || agent?.name || 'Unknown'
   }
 
   function getAgentStatus(tunnel: Tunnel) {
-    const agent = agents.find(a => a.id === tunnel.agentId)
-    return tunnel.agent?.status || agent?.status || 'unknown'
+    const backend = tunnel.backends?.[0]
+    const agentId = backend?.agentId || tunnel.agentId
+    const agent = agents.find(a => a.id === agentId)
+    return backend?.agent?.status || tunnel.agent?.status || agent?.status || 'unknown'
+  }
+
+  function getBackendAgentName(backend: TunnelBackend) {
+    const agent = agents.find(a => a.id === backend.agentId)
+    return backend.agent?.name || agent?.name || 'Unknown'
+  }
+
+  function getBackendAgentStatus(backend: TunnelBackend) {
+    const agent = agents.find(a => a.id === backend.agentId)
+    return backend.agent?.status || agent?.status || 'unknown'
   }
 
   function getGateway(gatewayId: string) {
@@ -709,7 +893,7 @@ export default function TunnelsPage() {
                       </span>
                     </span>
                     <span className="tunnel-list-meta">
-                      {getAgentName(tunnel)} to {tunnel.target}
+                      {(tunnel.backends?.length || 1)} backend{(tunnel.backends?.length || 1) === 1 ? '' : 's'} to {tunnel.backends?.[0]?.target || tunnel.target}
                     </span>
                     <span className="tunnel-list-badges">
                       <span className={`mini-badge ${dnsStatusClass(tunnel)}`}>{tunnel.dnsSync ? 'DNS' : 'Manual DNS'}</span>
@@ -730,7 +914,7 @@ export default function TunnelsPage() {
                 <div>
                   <p className="eyebrow">Selected Tunnel</p>
                   <h2>{selectedTunnel.domain}</h2>
-                  <p className="muted-line">{selectedTunnel.target}</p>
+                  <p className="muted-line">{selectedTunnel.backends?.length || 1} backend route</p>
                 </div>
                 <span className={`status ${selectedTunnel.enabled ? 'online' : 'offline'}`}>
                   {selectedTunnel.enabled ? 'Enabled' : 'Disabled'}
@@ -739,10 +923,10 @@ export default function TunnelsPage() {
 
               <Topology
                 tunnel={selectedTunnel}
-                agentName={getAgentName(selectedTunnel)}
-                agentStatus={getAgentStatus(selectedTunnel)}
                 gateways={gateways}
                 getGateway={getGateway}
+                getBackendAgentName={getBackendAgentName}
+                getBackendAgentStatus={getBackendAgentStatus}
               />
 
               <div className="detail-grid">
@@ -759,13 +943,13 @@ export default function TunnelsPage() {
                     onSave={() => updateTunnelTarget(selectedTunnel)}
                     onCancel={cancelTargetEdit}
                   />
-                  <KeyValue label="Agent" value={`${getAgentName(selectedTunnel)} (${getAgentStatus(selectedTunnel)})`} />
+                  <KeyValue label="Primary Agent" value={`${getAgentName(selectedTunnel)} (${getAgentStatus(selectedTunnel)})`} />
                   <KeyValue label="Created" value={formatDate(selectedTunnel.createdAt)} />
                 </DetailSection>
 
                 <DetailSection title="Network">
                   <KeyValue label="Subnet" value={selectedTunnel.subnet || 'Unassigned'} code={Boolean(selectedTunnel.subnet)} />
-                  <KeyValue label="Agent IP" value={selectedTunnel.agentIp || 'Unassigned'} code={Boolean(selectedTunnel.agentIp)} />
+                  <KeyValue label="Backend IPs" value={`${selectedTunnel.backends?.length || 0}`} />
                   <KeyValue label="Gateway IPs" value={`${selectedTunnel.gatewayIps.length}`} />
                   <div className="gateway-ip-list">
                     {selectedTunnel.gatewayIps.map(gatewayIp => {
@@ -809,6 +993,28 @@ export default function TunnelsPage() {
                   ) : (
                     <p className="muted-line">TLS is disabled for this route.</p>
                   )}
+                </DetailSection>
+
+                <DetailSection title="Backends">
+                  <BackendSettings
+                    tunnel={selectedTunnel}
+                    agents={agents}
+                    editingBackendId={editingBackendId}
+                    showAddForm={showBackendForm}
+                    draft={backendDraft}
+                    saving={backendSaving}
+                    error={backendError}
+                    getBackendAgentName={getBackendAgentName}
+                    getBackendAgentStatus={getBackendAgentStatus}
+                    onAdd={startBackendAdd}
+                    onEdit={startBackendEdit}
+                    onDraftChange={setBackendDraft}
+                    onCreate={() => createBackend(selectedTunnel)}
+                    onUpdate={(backend) => updateBackend(selectedTunnel, backend)}
+                    onDelete={(backend) => deleteBackend(selectedTunnel, backend)}
+                    onCancelEdit={cancelBackendEdit}
+                    onCancelAdd={cancelBackendAdd}
+                  />
                 </DetailSection>
 
                 <DetailSection title="Exit Node">
@@ -878,20 +1084,36 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function Topology({
   tunnel,
-  agentName,
-  agentStatus,
   gateways,
   getGateway,
+  getBackendAgentName,
+  getBackendAgentStatus,
 }: {
   tunnel: Tunnel
-  agentName: string
-  agentStatus: string
   gateways: Gateway[]
   getGateway: (gatewayId: string) => Gateway | undefined
+  getBackendAgentName: (backend: TunnelBackend) => string
+  getBackendAgentStatus: (backend: TunnelBackend) => string
 }) {
   const gatewayNodes = tunnel.gatewayIps.length > 0
     ? tunnel.gatewayIps
     : gateways.map(gateway => ({ gatewayId: gateway.id, gatewayName: gateway.name, ip: 'unassigned' }))
+  const backendNodes = tunnel.backends?.length > 0
+    ? tunnel.backends
+    : [{
+      id: tunnel.id,
+      tunnelId: tunnel.id,
+      agentId: tunnel.agentId,
+      target: tunnel.target,
+      enabled: tunnel.enabled,
+      draining: false,
+      weight: 100,
+      priority: 0,
+      agentIp: tunnel.agentIp || 'No agent IP',
+      status: 'unknown',
+      lastError: null,
+      agent: tunnel.agent,
+    }]
 
   return (
     <div className="topology-map" aria-label="Tunnel topology">
@@ -914,16 +1136,14 @@ function Topology({
         })}
       </div>
       <div className="topology-edge" />
-      <div className="topology-node agent">
-        <span>{agentName}</span>
-        <strong>{tunnel.agentIp || 'No agent IP'}</strong>
-        <small>{agentStatus}</small>
-      </div>
-      <div className="topology-edge" />
-      <div className="topology-node target">
-        <span>Target</span>
-        <strong>{tunnel.target}</strong>
-        <small>private origin</small>
+      <div className="topology-backend-stack">
+        {backendNodes.map(backend => (
+          <div key={backend.id} className={backend.enabled && !backend.draining ? 'topology-node agent' : 'topology-node agent muted'}>
+            <span>{getBackendAgentName(backend)}</span>
+            <strong>{backend.agentIp}</strong>
+            <small>{backend.target} / w{backend.weight} / p{backend.priority} / {getBackendAgentStatus(backend)}</small>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -944,6 +1164,233 @@ function KeyValue({ label, value, code = false }: { label: string; value: string
       <span>{label}</span>
       {code ? <code>{value}</code> : <strong>{value}</strong>}
     </div>
+  )
+}
+
+function BackendSettings({
+  tunnel,
+  agents,
+  editingBackendId,
+  showAddForm,
+  draft,
+  saving,
+  error,
+  getBackendAgentName,
+  getBackendAgentStatus,
+  onAdd,
+  onEdit,
+  onDraftChange,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onCancelEdit,
+  onCancelAdd,
+}: {
+  tunnel: Tunnel
+  agents: Agent[]
+  editingBackendId: string | null
+  showAddForm: boolean
+  draft: {
+    agentId: string
+    target: string
+    enabled: boolean
+    draining: boolean
+    weight: string
+    priority: string
+  }
+  saving: boolean
+  error: string
+  getBackendAgentName: (backend: TunnelBackend) => string
+  getBackendAgentStatus: (backend: TunnelBackend) => string
+  onAdd: () => void
+  onEdit: (backend: TunnelBackend) => void
+  onDraftChange: (draft: {
+    agentId: string
+    target: string
+    enabled: boolean
+    draining: boolean
+    weight: string
+    priority: string
+  }) => void
+  onCreate: () => void
+  onUpdate: (backend: TunnelBackend) => void
+  onDelete: (backend: TunnelBackend) => void
+  onCancelEdit: () => void
+  onCancelAdd: () => void
+}) {
+  return (
+    <div className="backend-settings">
+      <div className="backend-toolbar">
+        <span>{tunnel.backends.length} backend{tunnel.backends.length === 1 ? '' : 's'}</span>
+        <button type="button" className="secondary compact-button" onClick={onAdd}>
+          Add Backend
+        </button>
+      </div>
+
+      {showAddForm && (
+        <BackendForm
+          agents={agents}
+          draft={draft}
+          saving={saving}
+          submitLabel="Add"
+          onDraftChange={onDraftChange}
+          onSubmit={onCreate}
+          onCancel={onCancelAdd}
+        />
+      )}
+
+      <div className="backend-list">
+        {tunnel.backends.map((backend) => (
+          <div key={backend.id} className="backend-row">
+            {editingBackendId === backend.id ? (
+              <BackendForm
+                agents={agents}
+                draft={draft}
+                saving={saving}
+                submitLabel="Save"
+                onDraftChange={onDraftChange}
+                onSubmit={() => onUpdate(backend)}
+                onCancel={onCancelEdit}
+              />
+            ) : (
+              <>
+                <div className="backend-main">
+                  <span>{getBackendAgentName(backend)}</span>
+                  <code>{backend.agentIp}</code>
+                  <strong>{backend.target}</strong>
+                </div>
+                <div className="backend-meta">
+                  <span className={`mini-badge ${backend.enabled ? 'online' : 'offline'}`}>
+                    {backend.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                  {backend.draining && <span className="mini-badge warning">Draining</span>}
+                  <span className="mini-badge neutral">w{backend.weight}</span>
+                  <span className="mini-badge neutral">p{backend.priority}</span>
+                  <span className={`mini-badge ${getBackendAgentStatus(backend) === 'online' ? 'online' : 'offline'}`}>
+                    {getBackendAgentStatus(backend)}
+                  </span>
+                </div>
+                <div className="backend-actions">
+                  <button type="button" className="secondary compact-button" onClick={() => onEdit(backend)}>
+                    Edit
+                  </button>
+                  <button type="button" className="danger compact-button" onClick={() => onDelete(backend)}>
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      {error && <p className="detail-error compact">{error}</p>}
+    </div>
+  )
+}
+
+function BackendForm({
+  agents,
+  draft,
+  saving,
+  submitLabel,
+  onDraftChange,
+  onSubmit,
+  onCancel,
+}: {
+  agents: Agent[]
+  draft: {
+    agentId: string
+    target: string
+    enabled: boolean
+    draining: boolean
+    weight: string
+    priority: string
+  }
+  saving: boolean
+  submitLabel: string
+  onDraftChange: (draft: {
+    agentId: string
+    target: string
+    enabled: boolean
+    draining: boolean
+    weight: string
+    priority: string
+  }) => void
+  onSubmit: () => void
+  onCancel: () => void
+}) {
+  return (
+    <form
+      className="backend-form"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit()
+      }}
+    >
+      <select
+        value={draft.agentId}
+        disabled={saving}
+        onChange={(event) => onDraftChange({ ...draft, agentId: event.target.value })}
+      >
+        <option value="">Agent</option>
+        {agents.map((agent) => (
+          <option key={agent.id} value={agent.id}>
+            {agent.name}
+          </option>
+        ))}
+      </select>
+      <input
+        type="text"
+        value={draft.target}
+        placeholder="localhost:8080"
+        disabled={saving}
+        onChange={(event) => onDraftChange({ ...draft, target: event.target.value })}
+      />
+      <input
+        type="number"
+        min={1}
+        max={10000}
+        value={draft.weight}
+        aria-label="Weight"
+        disabled={saving}
+        onChange={(event) => onDraftChange({ ...draft, weight: event.target.value })}
+      />
+      <input
+        type="number"
+        min={0}
+        max={1000}
+        value={draft.priority}
+        aria-label="Priority"
+        disabled={saving}
+        onChange={(event) => onDraftChange({ ...draft, priority: event.target.value })}
+      />
+      <label className="check-row compact-check">
+        <input
+          type="checkbox"
+          checked={draft.enabled}
+          disabled={saving}
+          onChange={(event) => onDraftChange({ ...draft, enabled: event.target.checked })}
+        />
+        <span>Enabled</span>
+      </label>
+      <label className="check-row compact-check">
+        <input
+          type="checkbox"
+          checked={draft.draining}
+          disabled={saving}
+          onChange={(event) => onDraftChange({ ...draft, draining: event.target.checked })}
+        />
+        <span>Drain</span>
+      </label>
+      <div className="target-edit-actions">
+        <button type="submit" disabled={saving}>
+          {saving ? 'Saving...' : submitLabel}
+        </button>
+        <button type="button" className="secondary" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+      </div>
+    </form>
   )
 }
 

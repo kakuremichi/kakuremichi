@@ -6,6 +6,7 @@ import {
   agents,
   gateways,
   tunnels,
+  tunnelBackends,
   tunnelGatewayIps,
   certificates,
   tunnelTlsSettings,
@@ -420,8 +421,10 @@ export class ControlWebSocketServer {
 
     // Get all tunnels
     const allTunnels = await db.select().from(tunnels);
+    const allBackends = await db.select().from(tunnelBackends);
     const allTlsSettings = await db.select().from(tunnelTlsSettings);
     const tlsByTunnel = new Map(allTlsSettings.map((setting) => [setting.tunnelId, setting]));
+    const agentStatusById = new Map(allAgents.map((agent) => [agent.id, agent.status]));
 
     // Get this gateway's IPs for all tunnels
     const gatewayIps = await db
@@ -456,16 +459,14 @@ export class ControlWebSocketServer {
       }
     }
 
-    // Build agent list with WireGuard info (only online agents)
-    // Each agent's AllowedIPs should be the agentIPs of its tunnels
+    // Build agent list with WireGuard info (only online agents).
+    // Each agent's AllowedIPs should be the backend agent IPs it owns.
     const agentList = allAgents
       .filter((agent) => agent.status === 'online') // Only include online agents
       .map((agent) => {
-        // Get all tunnels for this agent and collect their agentIPs
-        const agentTunnels = allTunnels.filter(t => t.agentId === agent.id);
-        const allowedIPs = agentTunnels
-          .filter(t => t.agentIp)
-          .map(t => `${t.agentIp}/32`);
+        const allowedIPs = allBackends
+          .filter((backend) => backend.agentId === agent.id && backend.enabled && backend.agentIp)
+          .map((backend) => `${backend.agentIp}/32`);
 
         return {
           id: agent.id,
@@ -476,23 +477,47 @@ export class ControlWebSocketServer {
       });
 
     // Build tunnel list with network info (including this gateway's IP)
-    const tunnelList = allTunnels.map((tunnel) => ({
-      ...tunnel,
-      id: tunnel.id,
-      domain: tunnel.domain,
-      agentId: tunnel.agentId,
-      target: tunnel.target,
-      enabled: tunnel.enabled,
-      subnet: tunnel.subnet,
-      gatewayIp: gatewayIpByTunnel.get(tunnel.id) || null, // This gateway's IP for this tunnel
-      agentIp: tunnel.agentIp,
-      // Exit Node (Outbound Proxy) settings
-      httpProxyEnabled: tunnel.httpProxyEnabled,
-      socksProxyEnabled: tunnel.socksProxyEnabled,
-      tlsMode: tlsByTunnel.get(tunnel.id)?.mode ?? 'disabled',
-      certificateId: tlsByTunnel.get(tunnel.id)?.certificateId ?? null,
-      forceHttps: tlsByTunnel.get(tunnel.id)?.forceHttps ?? false,
-    }));
+    const backendsByTunnel = new Map<string, typeof allBackends>();
+    for (const backend of allBackends) {
+      if (!backendsByTunnel.has(backend.tunnelId)) {
+        backendsByTunnel.set(backend.tunnelId, []);
+      }
+      backendsByTunnel.get(backend.tunnelId)!.push(backend);
+    }
+
+    const tunnelList = allTunnels.map((tunnel) => {
+      const backendList = (backendsByTunnel.get(tunnel.id) || []).map((backend) => ({
+        id: backend.id,
+        tunnelId: backend.tunnelId,
+        agentId: backend.agentId,
+        target: backend.target,
+        enabled: backend.enabled,
+        draining: backend.draining,
+        weight: backend.weight,
+        priority: backend.priority,
+        agentIp: backend.agentIp,
+        agentStatus: agentStatusById.get(backend.agentId) ?? 'offline',
+      }));
+
+      return {
+        ...tunnel,
+        id: tunnel.id,
+        domain: tunnel.domain,
+        agentId: tunnel.agentId,
+        target: tunnel.target,
+        enabled: tunnel.enabled,
+        subnet: tunnel.subnet,
+        gatewayIp: gatewayIpByTunnel.get(tunnel.id) || null, // This gateway's IP for this tunnel
+        agentIp: tunnel.agentIp,
+        backends: backendList,
+        // Exit Node (Outbound Proxy) settings
+        httpProxyEnabled: tunnel.httpProxyEnabled,
+        socksProxyEnabled: tunnel.socksProxyEnabled,
+        tlsMode: tlsByTunnel.get(tunnel.id)?.mode ?? 'disabled',
+        certificateId: tlsByTunnel.get(tunnel.id)?.certificateId ?? null,
+        forceHttps: tlsByTunnel.get(tunnel.id)?.forceHttps ?? false,
+      };
+    });
 
     const config = {
       agents: agentList,
@@ -538,11 +563,15 @@ export class ControlWebSocketServer {
     // Get all gateways
     const allGateways = await db.select().from(gateways);
 
-    // Get tunnels for this agent
-    const agentTunnels = await db
+    // Get backends for this agent and their tunnels.
+    const agentBackends = await db
       .select()
-      .from(tunnels)
-      .where(eq(tunnels.agentId, agentId));
+      .from(tunnelBackends)
+      .where(eq(tunnelBackends.agentId, agentId));
+
+    const allTunnels = await db.select().from(tunnels);
+    const agentTunnelIds = new Set(agentBackends.map((backend) => backend.tunnelId));
+    const agentTunnels = allTunnels.filter((tunnel) => agentTunnelIds.has(tunnel.id));
 
     // Get all gateway IPs for this agent's tunnels
     const tunnelIds = agentTunnels.map(t => t.id);
@@ -594,17 +623,39 @@ export class ControlWebSocketServer {
       });
 
     // Build tunnel list with gateway IPs (only for online gateways)
+    const backendsByTunnel = new Map<string, typeof agentBackends>();
+    for (const backend of agentBackends) {
+      if (!backendsByTunnel.has(backend.tunnelId)) {
+        backendsByTunnel.set(backend.tunnelId, []);
+      }
+      backendsByTunnel.get(backend.tunnelId)!.push(backend);
+    }
+
     const tunnelList = agentTunnels.map((tunnel) => {
       const tunnelGatewayIpList = (gatewayIpsByTunnel.get(tunnel.id) || [])
         .filter(gip => onlineGatewayIds.has(gip.gatewayId)); // Only include online gateways
+      const backendList = (backendsByTunnel.get(tunnel.id) || []).map((backend) => ({
+        id: backend.id,
+        tunnelId: backend.tunnelId,
+        agentId: backend.agentId,
+        target: backend.target,
+        enabled: backend.enabled,
+        draining: backend.draining,
+        weight: backend.weight,
+        priority: backend.priority,
+        agentIp: backend.agentIp,
+        agentStatus: agentData.status,
+      }));
+      const primaryBackend = backendList[0];
 
       return {
         id: tunnel.id,
         domain: tunnel.domain,
-        target: tunnel.target,
+        target: primaryBackend?.target ?? tunnel.target,
         enabled: tunnel.enabled,
         subnet: tunnel.subnet,
-        agentIp: tunnel.agentIp,
+        agentIp: primaryBackend?.agentIp ?? tunnel.agentIp,
+        backends: backendList,
         gatewayIps: tunnelGatewayIpList, // Gateway IPs for this tunnel (online only)
         // Exit Node (Outbound Proxy) settings
         httpProxyEnabled: tunnel.httpProxyEnabled,

@@ -90,13 +90,36 @@ export const tunnelTlsConfigSchema = z.object({
   forceHttps: z.boolean().optional().default(true),
 }).strict();
 
+export const tunnelBackendInputSchema = z.object({
+  agentId: z.string().uuid('Invalid agent ID'),
+  target: targetSchema,
+  enabled: z.boolean().optional().default(true),
+  draining: z.boolean().optional().default(false),
+  weight: z.number().int().min(1).max(10000).optional().default(100),
+  priority: z.number().int().min(0).max(1000).optional().default(0),
+}).strict();
+
+export const createTunnelBackendSchema = tunnelBackendInputSchema;
+
+export const updateTunnelBackendSchema = z.object({
+  agentId: z.string().uuid('Invalid agent ID').optional(),
+  target: targetSchema.optional(),
+  enabled: z.boolean().optional(),
+  draining: z.boolean().optional(),
+  weight: z.number().int().min(1).max(10000).optional(),
+  priority: z.number().int().min(0).max(1000).optional(),
+  status: z.enum(['unknown', 'healthy', 'unhealthy', 'draining']).optional(),
+  lastError: z.string().max(500).nullable().optional(),
+}).strict();
+
 /**
  * Tunnel creation validation schema
  */
 export const createTunnelSchema = z.object({
   domain: domainSchema,
-  agentId: z.string().uuid('Invalid agent ID'),
-  target: targetSchema,
+  agentId: z.string().uuid('Invalid agent ID').optional(),
+  target: targetSchema.optional(),
+  backends: z.array(tunnelBackendInputSchema).min(1).max(64).optional(),
   description: z.string().max(500).optional(),
   // Exit Node (Outbound Proxy) settings
   httpProxyEnabled: z.boolean().optional().default(false),
@@ -113,7 +136,15 @@ export const createTunnelSchema = z.object({
     })
     .optional(),
   tls: tunnelTlsConfigSchema.optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.backends && value.backends.length > 0) return;
+  if (value.agentId && value.target) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: 'Either backends or agentId + target is required',
+    path: ['backends'],
+  });
+});
 
 /**
  * Tunnel update validation schema
