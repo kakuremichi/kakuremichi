@@ -91,6 +91,10 @@ export default function TunnelsPage() {
   const [error, setError] = useState('')
   const [showNewForm, setShowNewForm] = useState(false)
   const [selectedTunnelId, setSelectedTunnelId] = useState<string | null>(null)
+  const [editingTargetId, setEditingTargetId] = useState<string | null>(null)
+  const [targetDraft, setTargetDraft] = useState('')
+  const [targetSaving, setTargetSaving] = useState(false)
+  const [targetError, setTargetError] = useState('')
   const [formData, setFormData] = useState({
     domain: '',
     target: '',
@@ -259,6 +263,57 @@ export default function TunnelsPage() {
       fetchData()
     } catch (err) {
       alert('Failed to toggle tunnel')
+    }
+  }
+
+  function selectTunnel(id: string) {
+    setSelectedTunnelId(id)
+    setEditingTargetId(null)
+    setTargetError('')
+  }
+
+  function startTargetEdit(tunnel: Tunnel) {
+    setEditingTargetId(tunnel.id)
+    setTargetDraft(tunnel.target)
+    setTargetError('')
+  }
+
+  function cancelTargetEdit() {
+    setEditingTargetId(null)
+    setTargetDraft('')
+    setTargetError('')
+  }
+
+  async function updateTunnelTarget(tunnel: Tunnel) {
+    const nextTarget = targetDraft.trim()
+    if (!nextTarget) {
+      setTargetError('Target is required')
+      return
+    }
+    if (nextTarget === tunnel.target) {
+      cancelTargetEdit()
+      return
+    }
+
+    setTargetSaving(true)
+    setTargetError('')
+    try {
+      const res = await fetch(`/api/tunnels/${tunnel.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: nextTarget }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const detail = Array.isArray(data.details) ? data.details[0]?.message : null
+        throw new Error(detail || data.error || 'Failed to update target')
+      }
+      cancelTargetEdit()
+      fetchData()
+    } catch (err) {
+      setTargetError(err instanceof Error ? err.message : 'Failed to update target')
+    } finally {
+      setTargetSaving(false)
     }
   }
 
@@ -585,7 +640,7 @@ export default function TunnelsPage() {
                   <button
                     key={tunnel.id}
                     className={selected ? 'tunnel-list-item selected' : 'tunnel-list-item'}
-                    onClick={() => setSelectedTunnelId(tunnel.id)}
+                    onClick={() => selectTunnel(tunnel.id)}
                   >
                     <span className="tunnel-list-topline">
                       <strong>{tunnel.domain}</strong>
@@ -633,7 +688,17 @@ export default function TunnelsPage() {
               <div className="detail-grid">
                 <DetailSection title="Route">
                   <KeyValue label="Domain" value={selectedTunnel.domain} code />
-                  <KeyValue label="Target" value={selectedTunnel.target} code />
+                  <EditableTarget
+                    tunnel={selectedTunnel}
+                    editing={editingTargetId === selectedTunnel.id}
+                    draft={targetDraft}
+                    saving={targetSaving}
+                    error={targetError}
+                    onEdit={() => startTargetEdit(selectedTunnel)}
+                    onChange={setTargetDraft}
+                    onSave={() => updateTunnelTarget(selectedTunnel)}
+                    onCancel={cancelTargetEdit}
+                  />
                   <KeyValue label="Agent" value={`${getAgentName(selectedTunnel)} (${getAgentStatus(selectedTunnel)})`} />
                   <KeyValue label="Created" value={formatDate(selectedTunnel.createdAt)} />
                 </DetailSection>
@@ -811,6 +876,73 @@ function KeyValue({ label, value, code = false }: { label: string; value: string
     <div className="key-value">
       <span>{label}</span>
       {code ? <code>{value}</code> : <strong>{value}</strong>}
+    </div>
+  )
+}
+
+function EditableTarget({
+  tunnel,
+  editing,
+  draft,
+  saving,
+  error,
+  onEdit,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  tunnel: Tunnel
+  editing: boolean
+  draft: string
+  saving: boolean
+  error: string
+  onEdit: () => void
+  onChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  if (editing) {
+    return (
+      <div className="key-value editable-key-value">
+        <label htmlFor={`target-${tunnel.id}`}>Target</label>
+        <form
+          className="target-edit-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSave()
+          }}
+        >
+          <input
+            id={`target-${tunnel.id}`}
+            type="text"
+            value={draft}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="localhost:8080"
+            disabled={saving}
+          />
+          <div className="target-edit-actions">
+            <button type="submit" disabled={saving}>
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+            <button type="button" className="secondary" onClick={onCancel} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+          {error && <p className="detail-error compact">{error}</p>}
+        </form>
+      </div>
+    )
+  }
+
+  return (
+    <div className="key-value editable-key-value">
+      <span>Target</span>
+      <div className="target-read-row">
+        <code>{tunnel.target}</code>
+        <button type="button" className="secondary compact-button" onClick={onEdit}>
+          Edit
+        </button>
+      </div>
     </div>
   )
 }

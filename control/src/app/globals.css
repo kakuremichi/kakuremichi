@@ -946,6 +946,46 @@ ul {
   font-weight: 750;
 }
 
+.editable-key-value > label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.target-read-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.target-read-row code {
+  flex: 1 1 auto;
+}
+
+.compact-button {
+  min-height: 1.9rem;
+  padding: 0.28rem 0.6rem;
+  font-size: 0.78rem;
+}
+
+.target-edit-form {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+
+.target-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.target-edit-actions button {
+  min-height: 2.1rem;
+}
+
 .gateway-ip-list {
   display: grid;
   gap: 0.4rem;
@@ -975,6 +1015,10 @@ ul {
   color: var(--danger);
   font-size: 0.82rem;
   padding: 0.55rem 0.65rem;
+}
+
+.detail-error.compact {
+  margin-top: 0;
 }
 
 .protocol-list {
@@ -1166,5 +1210,18 @@ ul {
 
   .detail-actions button {
     flex: 1 1 10rem;
+  }
+
+  .target-read-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .target-read-row .compact-button {
+    align-self: flex-start;
+  }
+
+  .target-edit-actions button {
+    flex: 1 1 8rem;
   }
 }
