@@ -1027,6 +1027,22 @@ ul {
   gap: 0.5rem;
 }
 
+.exit-read-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.exit-edit-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.exit-check-row {
+  width: max-content;
+}
+
 .protocol {
   display: inline-flex;
   border: 1px solid var(--line);
@@ -1223,5 +1239,14 @@ ul {
 
   .target-edit-actions button {
     flex: 1 1 8rem;
+  }
+
+  .exit-read-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .exit-check-row {
+    width: auto;
   }
 }

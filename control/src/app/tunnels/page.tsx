@@ -95,6 +95,13 @@ export default function TunnelsPage() {
   const [targetDraft, setTargetDraft] = useState('')
   const [targetSaving, setTargetSaving] = useState(false)
   const [targetError, setTargetError] = useState('')
+  const [editingExitId, setEditingExitId] = useState<string | null>(null)
+  const [exitDraft, setExitDraft] = useState({
+    httpProxyEnabled: false,
+    socksProxyEnabled: false,
+  })
+  const [exitSaving, setExitSaving] = useState(false)
+  const [exitError, setExitError] = useState('')
   const [formData, setFormData] = useState({
     domain: '',
     target: '',
@@ -270,9 +277,13 @@ export default function TunnelsPage() {
     setSelectedTunnelId(id)
     setEditingTargetId(null)
     setTargetError('')
+    setEditingExitId(null)
+    setExitError('')
   }
 
   function startTargetEdit(tunnel: Tunnel) {
+    setEditingExitId(null)
+    setExitError('')
     setEditingTargetId(tunnel.id)
     setTargetDraft(tunnel.target)
     setTargetError('')
@@ -282,6 +293,23 @@ export default function TunnelsPage() {
     setEditingTargetId(null)
     setTargetDraft('')
     setTargetError('')
+  }
+
+  function startExitEdit(tunnel: Tunnel) {
+    setEditingTargetId(null)
+    setTargetError('')
+    setEditingExitId(tunnel.id)
+    setExitDraft({
+      httpProxyEnabled: tunnel.httpProxyEnabled,
+      socksProxyEnabled: tunnel.socksProxyEnabled,
+    })
+    setExitError('')
+  }
+
+  function cancelExitEdit() {
+    setEditingExitId(null)
+    setExitDraft({ httpProxyEnabled: false, socksProxyEnabled: false })
+    setExitError('')
   }
 
   async function updateTunnelTarget(tunnel: Tunnel) {
@@ -314,6 +342,38 @@ export default function TunnelsPage() {
       setTargetError(err instanceof Error ? err.message : 'Failed to update target')
     } finally {
       setTargetSaving(false)
+    }
+  }
+
+  async function updateTunnelExit(tunnel: Tunnel) {
+    const changed =
+      exitDraft.httpProxyEnabled !== tunnel.httpProxyEnabled ||
+      exitDraft.socksProxyEnabled !== tunnel.socksProxyEnabled
+
+    if (!changed) {
+      cancelExitEdit()
+      return
+    }
+
+    setExitSaving(true)
+    setExitError('')
+    try {
+      const res = await fetch(`/api/tunnels/${tunnel.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(exitDraft),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const detail = Array.isArray(data.details) ? data.details[0]?.message : null
+        throw new Error(detail || data.error || 'Failed to update exit node')
+      }
+      cancelExitEdit()
+      fetchData()
+    } catch (err) {
+      setExitError(err instanceof Error ? err.message : 'Failed to update exit node')
+    } finally {
+      setExitSaving(false)
     }
   }
 
@@ -752,10 +812,17 @@ export default function TunnelsPage() {
                 </DetailSection>
 
                 <DetailSection title="Exit Node">
-                  <div className="protocol-list">
-                    <span className={selectedTunnel.httpProxyEnabled ? 'protocol enabled' : 'protocol'}>HTTP localhost:8080</span>
-                    <span className={selectedTunnel.socksProxyEnabled ? 'protocol enabled' : 'protocol'}>SOCKS5 localhost:1080</span>
-                  </div>
+                  <EditableExitSettings
+                    tunnel={selectedTunnel}
+                    editing={editingExitId === selectedTunnel.id}
+                    draft={exitDraft}
+                    saving={exitSaving}
+                    error={exitError}
+                    onEdit={() => startExitEdit(selectedTunnel)}
+                    onChange={setExitDraft}
+                    onSave={() => updateTunnelExit(selectedTunnel)}
+                    onCancel={cancelExitEdit}
+                  />
                 </DetailSection>
               </div>
 
@@ -943,6 +1010,80 @@ function EditableTarget({
           Edit
         </button>
       </div>
+    </div>
+  )
+}
+
+function EditableExitSettings({
+  tunnel,
+  editing,
+  draft,
+  saving,
+  error,
+  onEdit,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  tunnel: Tunnel
+  editing: boolean
+  draft: { httpProxyEnabled: boolean; socksProxyEnabled: boolean }
+  saving: boolean
+  error: string
+  onEdit: () => void
+  onChange: (value: { httpProxyEnabled: boolean; socksProxyEnabled: boolean }) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  if (editing) {
+    return (
+      <form
+        className="exit-edit-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          onSave()
+        }}
+      >
+        <label className="check-row exit-check-row">
+          <input
+            type="checkbox"
+            checked={draft.httpProxyEnabled}
+            disabled={saving}
+            onChange={(event) => onChange({ ...draft, httpProxyEnabled: event.target.checked })}
+          />
+          <span>HTTP localhost:8080</span>
+        </label>
+        <label className="check-row exit-check-row">
+          <input
+            type="checkbox"
+            checked={draft.socksProxyEnabled}
+            disabled={saving}
+            onChange={(event) => onChange({ ...draft, socksProxyEnabled: event.target.checked })}
+          />
+          <span>SOCKS5 localhost:1080</span>
+        </label>
+        <div className="target-edit-actions">
+          <button type="submit" disabled={saving}>
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+          <button type="button" className="secondary" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+        </div>
+        {error && <p className="detail-error compact">{error}</p>}
+      </form>
+    )
+  }
+
+  return (
+    <div className="exit-read-panel">
+      <div className="protocol-list">
+        <span className={tunnel.httpProxyEnabled ? 'protocol enabled' : 'protocol'}>HTTP localhost:8080</span>
+        <span className={tunnel.socksProxyEnabled ? 'protocol enabled' : 'protocol'}>SOCKS5 localhost:1080</span>
+      </div>
+      <button type="button" className="secondary compact-button" onClick={onEdit}>
+        Edit
+      </button>
     </div>
   )
 }
