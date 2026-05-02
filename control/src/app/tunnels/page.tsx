@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 
 interface GatewayIP {
   gatewayId: string
@@ -13,6 +14,11 @@ interface Tunnel {
   domain: string
   target: string
   agentId: string
+  agent?: {
+    id: string
+    name: string
+    status: string
+  } | null
   enabled: boolean
   subnet: string | null
   agentIp: string | null
@@ -58,6 +64,14 @@ interface Tunnel {
 interface Agent {
   id: string
   name: string
+  status?: string
+}
+
+interface Gateway {
+  id: string
+  name: string
+  publicIp: string | null
+  status: string
 }
 
 interface DNSZone {
@@ -71,10 +85,12 @@ interface DNSZone {
 export default function TunnelsPage() {
   const [tunnels, setTunnels] = useState<Tunnel[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [gateways, setGateways] = useState<Gateway[]>([])
   const [zones, setZones] = useState<DNSZone[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showNewForm, setShowNewForm] = useState(false)
+  const [selectedTunnelId, setSelectedTunnelId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     domain: '',
     target: '',
@@ -95,23 +111,45 @@ export default function TunnelsPage() {
     fetchData()
   }, [])
 
+  const selectedTunnel = useMemo(() => {
+    if (tunnels.length === 0) return null
+    return tunnels.find(tunnel => tunnel.id === selectedTunnelId) ?? tunnels[0]
+  }, [selectedTunnelId, tunnels])
+
+  const metrics = useMemo(() => {
+    const enabled = tunnels.filter(tunnel => tunnel.enabled).length
+    const dnsManaged = tunnels.filter(tunnel => tunnel.dnsSync).length
+    const tlsReady = tunnels.filter(tunnel => tunnel.tls?.certificate?.status === 'ready').length
+    const exitEnabled = tunnels.filter(tunnel => tunnel.httpProxyEnabled || tunnel.socksProxyEnabled).length
+    return { enabled, dnsManaged, tlsReady, exitEnabled }
+  }, [tunnels])
+
   async function fetchData() {
     try {
-      const [tunnelsRes, agentsRes, zonesRes] = await Promise.all([
+      const [tunnelsRes, agentsRes, gatewaysRes, zonesRes] = await Promise.all([
         fetch('/api/tunnels'),
         fetch('/api/agents'),
+        fetch('/api/gateways'),
         fetch('/api/dns/zones'),
       ])
 
-      if (!tunnelsRes.ok || !agentsRes.ok || !zonesRes.ok) throw new Error('Failed to fetch data')
+      if (!tunnelsRes.ok || !agentsRes.ok || !gatewaysRes.ok || !zonesRes.ok) {
+        throw new Error('Failed to fetch data')
+      }
 
       const tunnelsData = await tunnelsRes.json()
       const agentsData = await agentsRes.json()
+      const gatewaysData = await gatewaysRes.json()
       const zonesData = await zonesRes.json()
 
       setTunnels(tunnelsData)
       setAgents(agentsData)
+      setGateways(gatewaysData)
       setZones(zonesData)
+      setSelectedTunnelId(current => {
+        if (current && tunnelsData.some((tunnel: Tunnel) => tunnel.id === current)) return current
+        return tunnelsData[0]?.id ?? null
+      })
     } catch (err) {
       setError('Failed to load tunnels')
     } finally {
@@ -126,7 +164,26 @@ export default function TunnelsPage() {
     }
 
     try {
-      const body: any = {
+      const body: {
+        domain: string
+        target: string
+        agentId: string
+        httpProxyEnabled: boolean
+        socksProxyEnabled: boolean
+        dnsSync?: {
+          enabled: boolean
+          zoneId: string
+          recordType: string
+          strategy: string
+          ttl: number
+          proxied: boolean
+        }
+        tls?: {
+          mode: string
+          dnsZoneId: string
+          forceHttps: boolean
+        }
+      } = {
         domain: formData.domain,
         target: formData.target,
         agentId: formData.agentId,
@@ -300,9 +357,18 @@ export default function TunnelsPage() {
     }
   }
 
-  function getAgentName(agentId: string) {
-    const agent = agents.find(a => a.id === agentId)
-    return agent ? agent.name : 'Unknown'
+  function getAgentName(tunnel: Tunnel) {
+    const agent = agents.find(a => a.id === tunnel.agentId)
+    return tunnel.agent?.name || agent?.name || 'Unknown'
+  }
+
+  function getAgentStatus(tunnel: Tunnel) {
+    const agent = agents.find(a => a.id === tunnel.agentId)
+    return tunnel.agent?.status || agent?.status || 'unknown'
+  }
+
+  function getGateway(gatewayId: string) {
+    return gateways.find(gateway => gateway.id === gatewayId)
   }
 
   function certificateStatusClass(status?: string) {
@@ -311,359 +377,440 @@ export default function TunnelsPage() {
     return 'offline'
   }
 
+  function dnsStatusClass(tunnel: Tunnel) {
+    if (!tunnel.dnsSync) return 'neutral'
+    return tunnel.dnsSync.lastError ? 'offline' : 'online'
+  }
+
+  function tlsLabel(tunnel: Tunnel) {
+    const certificate = tunnel.tls?.certificate
+    if (tunnel.tls?.mode === 'gateway_acme') return 'Gateway ACME'
+    if (tunnel.tls?.mode !== 'auto' || !certificate) return 'Disabled'
+    if (certificate.status === 'ready') return 'Ready'
+    if (certificate.status === 'pending') return 'Issue required'
+    return certificate.status
+  }
+
+  function formatDate(value: string | null, mode: 'date' | 'datetime' = 'datetime') {
+    if (!value) return 'Never'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return 'Never'
+    return mode === 'date' ? date.toLocaleDateString() : date.toLocaleString()
+  }
+
   if (loading) return <div className="loading">Loading...</div>
   if (error) return <div className="error">{error}</div>
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h1>Tunnels</h1>
+    <div className="tunnels-page">
+      <div className="page-header-row">
+        <div>
+          <h1>Tunnels</h1>
+          <p className="page-subtitle">Operate routes from public domains through Gateways to private Agent targets.</p>
+        </div>
         <button onClick={() => setShowNewForm(!showNewForm)}>
           {showNewForm ? 'Cancel' : 'New Tunnel'}
         </button>
       </div>
 
+      <div className="tunnel-metrics" aria-label="Tunnel summary">
+        <Metric label="Total" value={tunnels.length} />
+        <Metric label="Enabled" value={metrics.enabled} />
+        <Metric label="DNS managed" value={metrics.dnsManaged} />
+        <Metric label="TLS ready" value={metrics.tlsReady} />
+        <Metric label="Exit proxy" value={metrics.exitEnabled} />
+      </div>
+
       {showNewForm && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
+        <div className="card tunnel-create-panel">
           <h2>Create New Tunnel</h2>
-          <div className="form-group">
-            <label>Domain</label>
-            <input
-              type="text"
-              value={formData.domain}
-              onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
-              placeholder="app.example.com"
-            />
-          </div>
-          <div className="form-group">
-            <label>Target</label>
-            <input
-              type="text"
-              value={formData.target}
-              onChange={(e) => setFormData({ ...formData, target: e.target.value })}
-              placeholder="localhost:8080"
-            />
-          </div>
-          <div className="form-group">
-            <label>Agent</label>
-            <select
-              value={formData.agentId}
-              onChange={(e) => setFormData({ ...formData, agentId: e.target.value })}
-            >
-              <option value="">Select an agent</option>
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
-            <h3 style={{ fontSize: '0.875rem', marginBottom: '0.5rem', color: '#666' }}>Exit Node Settings</h3>
-            <div style={{ display: 'flex', gap: '1.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={formData.httpProxyEnabled}
-                  onChange={(e) => setFormData({ ...formData, httpProxyEnabled: e.target.checked })}
-                />
-                <span>Enable HTTP Proxy (localhost:8080)</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={formData.socksProxyEnabled}
-                  onChange={(e) => setFormData({ ...formData, socksProxyEnabled: e.target.checked })}
-                />
-                <span>Enable SOCKS5 Proxy (localhost:1080)</span>
-              </label>
+          <div className="tunnel-form-grid">
+            <div className="form-group">
+              <label>Domain</label>
+              <input
+                type="text"
+                value={formData.domain}
+                onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+                placeholder="app.example.com"
+              />
+            </div>
+            <div className="form-group">
+              <label>Target</label>
+              <input
+                type="text"
+                value={formData.target}
+                onChange={(e) => setFormData({ ...formData, target: e.target.value })}
+                placeholder="localhost:8080"
+              />
+            </div>
+            <div className="form-group">
+              <label>Agent</label>
+              <select
+                value={formData.agentId}
+                onChange={(e) => setFormData({ ...formData, agentId: e.target.value })}
+              >
+                <option value="">Select an agent</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
-            <h3 style={{ fontSize: '0.875rem', marginBottom: '0.5rem', color: '#666' }}>DNS Sync</h3>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: '1rem' }}>
+
+          <div className="tunnel-form-options">
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={formData.httpProxyEnabled}
+                onChange={(e) => setFormData({ ...formData, httpProxyEnabled: e.target.checked })}
+              />
+              <span>HTTP exit proxy</span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={formData.socksProxyEnabled}
+                onChange={(e) => setFormData({ ...formData, socksProxyEnabled: e.target.checked })}
+              />
+              <span>SOCKS5 exit proxy</span>
+            </label>
+            <label className="check-row">
               <input
                 type="checkbox"
                 checked={formData.dnsSyncEnabled}
                 onChange={(e) => setFormData({ ...formData, dnsSyncEnabled: e.target.checked })}
               />
-              <span>Keep this domain pointed at Gateway public IPs</span>
+              <span>DNS sync</span>
             </label>
-            {formData.dnsSyncEnabled && (
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label>DNS Zone</label>
-                  <select
-                    value={formData.dnsZoneId}
-                    onChange={(e) => setFormData({ ...formData, dnsZoneId: e.target.value })}
-                  >
-                    <option value="">Select a zone</option>
-                    {zones.filter(zone => zone.enabled).map((zone) => (
-                      <option key={zone.id} value={zone.id}>
-                        {zone.name} ({zone.providerName})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Strategy</label>
-                  <select
-                    value={formData.dnsStrategy}
-                    onChange={(e) => setFormData({ ...formData, dnsStrategy: e.target.value })}
-                  >
-                    <option value="all_gateways">All gateways</option>
-                    <option value="online_gateways">Online gateways</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>TTL</label>
-                  <input
-                    type="number"
-                    min={60}
-                    max={86400}
-                    value={formData.dnsTtl}
-                    onChange={(e) => setFormData({ ...formData, dnsTtl: e.target.value })}
-                  />
-                </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.dnsProxied}
-                    onChange={(e) => setFormData({ ...formData, dnsProxied: e.target.checked })}
-                  />
-                  <span>Cloudflare proxied</span>
-                </label>
-              </div>
-            )}
-          </div>
-          <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
-            <h3 style={{ fontSize: '0.875rem', marginBottom: '0.5rem', color: '#666' }}>TLS</h3>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: '1rem' }}>
+            <label className="check-row">
               <input
                 type="checkbox"
                 checked={formData.tlsEnabled}
                 onChange={(e) => setFormData({ ...formData, tlsEnabled: e.target.checked })}
               />
-              <span>Issue and serve a Control-managed HTTPS certificate</span>
+              <span>Control-managed TLS</span>
             </label>
-            {formData.tlsEnabled && (
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label>DNS-01 Zone</label>
-                  <select
-                    value={formData.tlsDnsZoneId || formData.dnsZoneId}
-                    onChange={(e) => setFormData({ ...formData, tlsDnsZoneId: e.target.value })}
-                  >
-                    <option value="">Select a zone</option>
-                    {zones.filter(zone => zone.enabled).map((zone) => (
-                      <option key={zone.id} value={zone.id}>
-                        {zone.name} ({zone.providerName})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.85rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.tlsForceHttps}
-                    onChange={(e) => setFormData({ ...formData, tlsForceHttps: e.target.checked })}
-                  />
-                  <span>Force HTTPS</span>
-                </label>
-              </div>
-            )}
           </div>
+
+          {(formData.dnsSyncEnabled || formData.tlsEnabled) && (
+            <div className="tunnel-form-grid compact">
+              {formData.dnsSyncEnabled && (
+                <>
+                  <div className="form-group">
+                    <label>DNS Zone</label>
+                    <select
+                      value={formData.dnsZoneId}
+                      onChange={(e) => setFormData({ ...formData, dnsZoneId: e.target.value })}
+                    >
+                      <option value="">Select a zone</option>
+                      {zones.filter(zone => zone.enabled).map((zone) => (
+                        <option key={zone.id} value={zone.id}>
+                          {zone.name} ({zone.providerName})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Strategy</label>
+                    <select
+                      value={formData.dnsStrategy}
+                      onChange={(e) => setFormData({ ...formData, dnsStrategy: e.target.value })}
+                    >
+                      <option value="all_gateways">All gateways</option>
+                      <option value="online_gateways">Online gateways</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>TTL</label>
+                    <input
+                      type="number"
+                      min={60}
+                      max={86400}
+                      value={formData.dnsTtl}
+                      onChange={(e) => setFormData({ ...formData, dnsTtl: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
+              {formData.tlsEnabled && (
+                <>
+                  <div className="form-group">
+                    <label>DNS-01 Zone</label>
+                    <select
+                      value={formData.tlsDnsZoneId || formData.dnsZoneId}
+                      onChange={(e) => setFormData({ ...formData, tlsDnsZoneId: e.target.value })}
+                    >
+                      <option value="">Select a zone</option>
+                      {zones.filter(zone => zone.enabled).map((zone) => (
+                        <option key={zone.id} value={zone.id}>
+                          {zone.name} ({zone.providerName})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="check-row align-end">
+                    <input
+                      type="checkbox"
+                      checked={formData.tlsForceHttps}
+                      onChange={(e) => setFormData({ ...formData, tlsForceHttps: e.target.checked })}
+                    />
+                    <span>Force HTTPS after issue</span>
+                  </label>
+                </>
+              )}
+            </div>
+          )}
+
           <button onClick={createTunnel}>Create Tunnel</button>
         </div>
       )}
 
-      <div className="card">
-        <h2>Tunnel List ({tunnels.length})</h2>
-        {tunnels.length === 0 ? (
+      {tunnels.length === 0 ? (
+        <div className="card">
           <p style={{ color: '#666' }}>No tunnels yet. Create one to get started.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Domain</th>
-                <th>Target</th>
-                <th>Agent</th>
-                <th>Network</th>
-                <th>Exit Node</th>
-                <th>DNS</th>
-                <th>TLS</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tunnels.map((tunnel) => (
-                <tr key={tunnel.id}>
-                  <td><strong>{tunnel.domain}</strong></td>
-                  <td><code>{tunnel.target}</code></td>
-                  <td>{getAgentName(tunnel.agentId)}</td>
-                  <td style={{ fontSize: '0.75rem' }}>
-                    {tunnel.subnet ? (
-                      <div>
-                        <div><code>{tunnel.subnet}</code></div>
-                        <div style={{ color: '#666' }}>
-                          Agent: {tunnel.agentIp}
-                        </div>
-                        {tunnel.gatewayIps && tunnel.gatewayIps.length > 0 && (
-                          <div style={{ color: '#666', marginTop: '4px' }}>
-                            {tunnel.gatewayIps.map((gw) => (
-                              <div key={gw.gatewayId}>
-                                GW ({gw.gatewayName}): {gw.ip}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#999' }}>-</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: '0.75rem' }}>
-                    {(tunnel.httpProxyEnabled || tunnel.socksProxyEnabled) ? (
-                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                        {tunnel.httpProxyEnabled && (
-                          <span style={{
-                            background: '#e3f2fd',
-                            color: '#1565c0',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontSize: '0.7rem'
-                          }}>HTTP</span>
-                        )}
-                        {tunnel.socksProxyEnabled && (
-                          <span style={{
-                            background: '#f3e5f5',
-                            color: '#7b1fa2',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontSize: '0.7rem'
-                          }}>SOCKS5</span>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#999' }}>-</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: '0.75rem' }}>
-                    {tunnel.dnsSync ? (
-                      <div>
-                        <div>
-                          <span className={`status ${tunnel.dnsSync.lastError ? 'offline' : 'online'}`}>
-                            {tunnel.dnsSync.lastError ? 'Error' : 'Managed'}
-                          </span>
-                        </div>
-                        <div style={{ color: '#666', marginTop: '0.25rem' }}>
-                          {tunnel.dnsSync.zone.name} via {tunnel.dnsSync.provider.name}
-                        </div>
-                        <div style={{ color: '#666' }}>
-                          {tunnel.dnsSync.lastSyncAt
-                            ? `Last: ${new Date(tunnel.dnsSync.lastSyncAt).toLocaleString()}`
-                            : 'Never synced'}
-                        </div>
-                        {tunnel.dnsSync.lastError && (
-                          <div style={{ color: '#b91c1c', marginTop: '0.25rem' }}>
-                            {tunnel.dnsSync.lastError}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#999' }}>Manual</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: '0.75rem' }}>
-                    {tunnel.tls?.mode === 'auto' && tunnel.tls.certificate ? (
-                      <div>
-                        <div>
-                          <span className={`status ${certificateStatusClass(tunnel.tls.certificate.status)}`}>
-                            {tunnel.tls.certificate.status}
-                          </span>
-                        </div>
-                        <div style={{ color: '#666', marginTop: '0.25rem' }}>
-                          {tunnel.tls.certificate.domain}
-                        </div>
-                        <div style={{ color: '#666' }}>
-                          {tunnel.tls.certificate.notAfter
-                            ? `Expires: ${new Date(tunnel.tls.certificate.notAfter).toLocaleDateString()}`
-                            : 'Not issued'}
-                        </div>
-                        <div style={{ color: '#666' }}>
-                          {tunnel.tls.forceHttps ? 'Force HTTPS' : 'HTTPS optional'}
-                        </div>
-                        {tunnel.tls.certificate.lastError && (
-                          <div style={{ color: '#b91c1c', marginTop: '0.25rem' }}>
-                            {tunnel.tls.certificate.lastError}
-                          </div>
-                        )}
-                      </div>
-                    ) : tunnel.tls?.mode === 'gateway_acme' ? (
-                      <span className="status warning">Gateway ACME</span>
-                    ) : (
-                      <span style={{ color: '#999' }}>Disabled</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`status ${tunnel.enabled ? 'online' : 'offline'}`}>
-                      {tunnel.enabled ? 'Enabled' : 'Disabled'}
+        </div>
+      ) : (
+        <div className="tunnel-workbench">
+          <section className="tunnel-list-panel" aria-label="Tunnel list">
+            <div className="panel-heading">
+              <h2>Tunnel List</h2>
+              <span>{tunnels.length} routes</span>
+            </div>
+            <div className="tunnel-list">
+              {tunnels.map((tunnel) => {
+                const selected = selectedTunnel?.id === tunnel.id
+                return (
+                  <button
+                    key={tunnel.id}
+                    className={selected ? 'tunnel-list-item selected' : 'tunnel-list-item'}
+                    onClick={() => setSelectedTunnelId(tunnel.id)}
+                  >
+                    <span className="tunnel-list-topline">
+                      <strong>{tunnel.domain}</strong>
+                      <span className={`status ${tunnel.enabled ? 'online' : 'offline'}`}>
+                        {tunnel.enabled ? 'Enabled' : 'Disabled'}
+                      </span>
                     </span>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button
-                        className="secondary"
-                        onClick={() => toggleTunnel(tunnel.id, tunnel.enabled)}
-                      >
-                        {tunnel.enabled ? 'Disable' : 'Enable'}
-                      </button>
-                      {tunnel.dnsSync && (
-                        <button
-                          className="secondary"
-                          onClick={() => syncDns(tunnel.id)}
-                        >
-                          Sync DNS
-                        </button>
-                      )}
-                      {tunnel.tls?.mode === 'auto' && tunnel.tls.certificate ? (
-                        <>
-                          <button
-                            className="secondary"
-                            onClick={() => issueCertificate(tunnel.tls.certificate!.id)}
-                          >
-                            {tunnel.tls.certificate.status === 'ready' ? 'Renew TLS' : 'Issue TLS'}
-                          </button>
-                          <button
-                            className="secondary"
-                            onClick={() => disableTls(tunnel)}
-                          >
-                            Disable TLS
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="secondary"
-                          onClick={() => enableTls(tunnel)}
-                        >
-                          Enable TLS
-                        </button>
-                      )}
-                      <button
-                        className="danger"
-                        onClick={() => deleteTunnel(tunnel.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                    <span className="tunnel-list-meta">
+                      {getAgentName(tunnel)} to {tunnel.target}
+                    </span>
+                    <span className="tunnel-list-badges">
+                      <span className={`mini-badge ${dnsStatusClass(tunnel)}`}>{tunnel.dnsSync ? 'DNS' : 'Manual DNS'}</span>
+                      <span className={`mini-badge ${certificateStatusClass(tunnel.tls?.certificate?.status)}`}>
+                        {tlsLabel(tunnel)}
+                      </span>
+                      {(tunnel.httpProxyEnabled || tunnel.socksProxyEnabled) && <span className="mini-badge neutral">Exit</span>}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          {selectedTunnel && (
+            <section className="tunnel-detail-panel" aria-label="Tunnel detail">
+              <div className="detail-header">
+                <div>
+                  <p className="eyebrow">Selected Tunnel</p>
+                  <h2>{selectedTunnel.domain}</h2>
+                  <p className="muted-line">{selectedTunnel.target}</p>
+                </div>
+                <span className={`status ${selectedTunnel.enabled ? 'online' : 'offline'}`}>
+                  {selectedTunnel.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+
+              <Topology
+                tunnel={selectedTunnel}
+                agentName={getAgentName(selectedTunnel)}
+                agentStatus={getAgentStatus(selectedTunnel)}
+                gateways={gateways}
+                getGateway={getGateway}
+              />
+
+              <div className="detail-grid">
+                <DetailSection title="Route">
+                  <KeyValue label="Domain" value={selectedTunnel.domain} code />
+                  <KeyValue label="Target" value={selectedTunnel.target} code />
+                  <KeyValue label="Agent" value={`${getAgentName(selectedTunnel)} (${getAgentStatus(selectedTunnel)})`} />
+                  <KeyValue label="Created" value={formatDate(selectedTunnel.createdAt)} />
+                </DetailSection>
+
+                <DetailSection title="Network">
+                  <KeyValue label="Subnet" value={selectedTunnel.subnet || 'Unassigned'} code={Boolean(selectedTunnel.subnet)} />
+                  <KeyValue label="Agent IP" value={selectedTunnel.agentIp || 'Unassigned'} code={Boolean(selectedTunnel.agentIp)} />
+                  <KeyValue label="Gateway IPs" value={`${selectedTunnel.gatewayIps.length}`} />
+                  <div className="gateway-ip-list">
+                    {selectedTunnel.gatewayIps.map(gatewayIp => {
+                      const gateway = getGateway(gatewayIp.gatewayId)
+                      return (
+                        <div key={gatewayIp.gatewayId}>
+                          <span>{gatewayIp.gatewayName}</span>
+                          <code>{gatewayIp.ip}</code>
+                          <small>{gateway?.publicIp || 'no public IP'}</small>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </DetailSection>
+
+                <DetailSection title="DNS">
+                  {selectedTunnel.dnsSync ? (
+                    <>
+                      <KeyValue label="Mode" value={selectedTunnel.dnsSync.lastError ? 'Error' : 'Managed'} />
+                      <KeyValue label="Zone" value={selectedTunnel.dnsSync.zone.name} />
+                      <KeyValue label="Provider" value={`${selectedTunnel.dnsSync.provider.name} (${selectedTunnel.dnsSync.provider.type})`} />
+                      <KeyValue label="Last sync" value={formatDate(selectedTunnel.dnsSync.lastSyncAt)} />
+                      {selectedTunnel.dnsSync.lastError && <p className="detail-error">{selectedTunnel.dnsSync.lastError}</p>}
+                    </>
+                  ) : (
+                    <p className="muted-line">Manual DNS. Control will not update records for this hostname.</p>
+                  )}
+                </DetailSection>
+
+                <DetailSection title="TLS">
+                  {selectedTunnel.tls?.mode === 'auto' && selectedTunnel.tls.certificate ? (
+                    <>
+                      <KeyValue label="Status" value={tlsLabel(selectedTunnel)} />
+                      <KeyValue label="Certificate" value={selectedTunnel.tls.certificate.domain} />
+                      <KeyValue label="Expires" value={selectedTunnel.tls.certificate.notAfter ? formatDate(selectedTunnel.tls.certificate.notAfter, 'date') : 'Not issued'} />
+                      <KeyValue label="HTTPS policy" value={selectedTunnel.tls.forceHttps ? 'Force HTTPS' : 'Optional HTTPS'} />
+                      {selectedTunnel.tls.certificate.lastError && <p className="detail-error">{selectedTunnel.tls.certificate.lastError}</p>}
+                    </>
+                  ) : selectedTunnel.tls?.mode === 'gateway_acme' ? (
+                    <p className="muted-line">Gateway-managed ACME is configured for this route.</p>
+                  ) : (
+                    <p className="muted-line">TLS is disabled for this route.</p>
+                  )}
+                </DetailSection>
+
+                <DetailSection title="Exit Node">
+                  <div className="protocol-list">
+                    <span className={selectedTunnel.httpProxyEnabled ? 'protocol enabled' : 'protocol'}>HTTP localhost:8080</span>
+                    <span className={selectedTunnel.socksProxyEnabled ? 'protocol enabled' : 'protocol'}>SOCKS5 localhost:1080</span>
+                  </div>
+                </DetailSection>
+              </div>
+
+              <div className="detail-actions">
+                <button
+                  className="secondary"
+                  onClick={() => toggleTunnel(selectedTunnel.id, selectedTunnel.enabled)}
+                >
+                  {selectedTunnel.enabled ? 'Disable' : 'Enable'}
+                </button>
+                {selectedTunnel.dnsSync && (
+                  <button className="secondary" onClick={() => syncDns(selectedTunnel.id)}>
+                    Sync DNS
+                  </button>
+                )}
+                {selectedTunnel.tls?.mode === 'auto' && selectedTunnel.tls.certificate ? (
+                  <>
+                    <button
+                      className="secondary"
+                      onClick={() => issueCertificate(selectedTunnel.tls.certificate!.id)}
+                    >
+                      {selectedTunnel.tls.certificate.status === 'ready' ? 'Renew TLS' : 'Issue TLS'}
+                    </button>
+                    <button className="secondary" onClick={() => disableTls(selectedTunnel)}>
+                      Disable TLS
+                    </button>
+                  </>
+                ) : (
+                  <button className="secondary" onClick={() => enableTls(selectedTunnel)}>
+                    Enable TLS
+                  </button>
+                )}
+                <button className="danger" onClick={() => deleteTunnel(selectedTunnel.id)}>
+                  Delete
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="tunnel-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  )
+}
+
+function Topology({
+  tunnel,
+  agentName,
+  agentStatus,
+  gateways,
+  getGateway,
+}: {
+  tunnel: Tunnel
+  agentName: string
+  agentStatus: string
+  gateways: Gateway[]
+  getGateway: (gatewayId: string) => Gateway | undefined
+}) {
+  const gatewayNodes = tunnel.gatewayIps.length > 0
+    ? tunnel.gatewayIps
+    : gateways.map(gateway => ({ gatewayId: gateway.id, gatewayName: gateway.name, ip: 'unassigned' }))
+
+  return (
+    <div className="topology-map" aria-label="Tunnel topology">
+      <div className="topology-node source">
+        <span>Client</span>
+        <strong>Public request</strong>
+        <small>{tunnel.domain}</small>
       </div>
+      <div className="topology-edge" />
+      <div className="topology-gateway-stack">
+        {gatewayNodes.map(gatewayIp => {
+          const gateway = getGateway(gatewayIp.gatewayId)
+          return (
+            <div key={gatewayIp.gatewayId} className="topology-node gateway">
+              <span>{gatewayIp.gatewayName}</span>
+              <strong>{gateway?.publicIp || 'No public IP'}</strong>
+              <small>{gatewayIp.ip}</small>
+            </div>
+          )
+        })}
+      </div>
+      <div className="topology-edge" />
+      <div className="topology-node agent">
+        <span>{agentName}</span>
+        <strong>{tunnel.agentIp || 'No agent IP'}</strong>
+        <small>{agentStatus}</small>
+      </div>
+      <div className="topology-edge" />
+      <div className="topology-node target">
+        <span>Target</span>
+        <strong>{tunnel.target}</strong>
+        <small>private origin</small>
+      </div>
+    </div>
+  )
+}
+
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="detail-section">
+      <h3>{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function KeyValue({ label, value, code = false }: { label: string; value: string; code?: boolean }) {
+  return (
+    <div className="key-value">
+      <span>{label}</span>
+      {code ? <code>{value}</code> : <strong>{value}</strong>}
     </div>
   )
 }
