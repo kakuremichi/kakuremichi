@@ -909,6 +909,38 @@ ul {
   min-width: 0;
 }
 
+.topology-agent-side {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f7fef9, #ffffff);
+  padding: 0.75rem;
+}
+
+.topology-agent-side-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid #dcfce7;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding-bottom: 0.55rem;
+}
+
+.topology-agent-side-header span {
+  color: #166534;
+  text-transform: uppercase;
+}
+
+.topology-agent-side-header strong {
+  color: #475569;
+  font-size: 0.78rem;
+}
+
 .topology-backend-route {
   display: grid;
   grid-template-columns: minmax(150px, 1fr) 28px minmax(150px, 1.15fr);
