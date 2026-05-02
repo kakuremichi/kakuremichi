@@ -3,6 +3,7 @@ import { db, gateways } from '@/lib/db';
 import { createGatewaySchema } from '@/lib/utils/validation';
 import { generateGatewayApiKey, allocateTunnelIpsForGateway } from '@/lib/utils';
 import { getWebSocketServer } from '@/lib/ws';
+import { syncAllDnsSettings } from '@/lib/dns/sync';
 import { withAuth } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
@@ -39,6 +40,11 @@ export async function POST(request: NextRequest) {
       const createdGateway = newGateway[0];
       if (createdGateway) {
         await allocateTunnelIpsForGateway(createdGateway.id);
+        try {
+          await syncAllDnsSettings();
+        } catch (err) {
+          console.error('Failed to sync DNS after gateway creation:', err);
+        }
       }
 
       try {

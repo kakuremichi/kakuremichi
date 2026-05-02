@@ -3,6 +3,7 @@ import { db, gateways } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
 import { getWebSocketServer } from '@/lib/ws';
+import { syncAllDnsSettings } from '@/lib/dns/sync';
 
 async function broadcastGatewayChange() {
   try {
@@ -12,6 +13,14 @@ async function broadcastGatewayChange() {
     await wsServer.broadcastAllAgentConfigs();
   } catch (err) {
     console.error('Failed to broadcast gateway change:', err);
+  }
+}
+
+async function reconcileDns() {
+  try {
+    await syncAllDnsSettings();
+  } catch (err) {
+    console.error('Failed to sync DNS after gateway change:', err);
   }
 }
 
@@ -45,6 +54,7 @@ export async function DELETE(
       if (deleted.length === 0) {
         return NextResponse.json({ error: 'Gateway not found' }, { status: 404 });
       }
+      await reconcileDns();
       await broadcastGatewayChange();
       return NextResponse.json({ success: true });
     } catch (error) {
@@ -78,6 +88,7 @@ export async function PATCH(
       if (updated.length === 0) {
         return NextResponse.json({ error: 'Gateway not found' }, { status: 404 });
       }
+      await reconcileDns();
       await broadcastGatewayChange();
       return NextResponse.json(updated[0]);
     } catch (error) {

@@ -64,6 +64,13 @@
       "when": 1776595319348,
       "tag": "0008_fearless_wildside",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1777695122466,
+      "tag": "0009_goofy_mister_fear",
+      "breakpoints": true
     }
   ]
 }

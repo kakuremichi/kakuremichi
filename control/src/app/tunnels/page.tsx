@@ -19,6 +19,24 @@ interface Tunnel {
   gatewayIps: GatewayIP[]
   httpProxyEnabled: boolean
   socksProxyEnabled: boolean
+  dnsSync: {
+    enabled: boolean
+    recordType: string
+    strategy: string
+    ttl: number
+    proxied: boolean
+    lastSyncAt: string | null
+    lastError: string | null
+    zone: {
+      id: string
+      name: string
+    }
+    provider: {
+      id: string
+      name: string
+      type: string
+    }
+  } | null
   createdAt: string
   updatedAt: string
 }
@@ -28,9 +46,18 @@ interface Agent {
   name: string
 }
 
+interface DNSZone {
+  id: string
+  name: string
+  providerName: string
+  providerType: string
+  enabled: boolean
+}
+
 export default function TunnelsPage() {
   const [tunnels, setTunnels] = useState<Tunnel[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [zones, setZones] = useState<DNSZone[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showNewForm, setShowNewForm] = useState(false)
@@ -40,6 +67,11 @@ export default function TunnelsPage() {
     agentId: '',
     httpProxyEnabled: false,
     socksProxyEnabled: false,
+    dnsSyncEnabled: false,
+    dnsZoneId: '',
+    dnsStrategy: 'all_gateways',
+    dnsTtl: '60',
+    dnsProxied: false,
   })
 
   useEffect(() => {
@@ -48,18 +80,21 @@ export default function TunnelsPage() {
 
   async function fetchData() {
     try {
-      const [tunnelsRes, agentsRes] = await Promise.all([
+      const [tunnelsRes, agentsRes, zonesRes] = await Promise.all([
         fetch('/api/tunnels'),
         fetch('/api/agents'),
+        fetch('/api/dns/zones'),
       ])
 
-      if (!tunnelsRes.ok || !agentsRes.ok) throw new Error('Failed to fetch data')
+      if (!tunnelsRes.ok || !agentsRes.ok || !zonesRes.ok) throw new Error('Failed to fetch data')
 
       const tunnelsData = await tunnelsRes.json()
       const agentsData = await agentsRes.json()
+      const zonesData = await zonesRes.json()
 
       setTunnels(tunnelsData)
       setAgents(agentsData)
+      setZones(zonesData)
     } catch (err) {
       setError('Failed to load tunnels')
     } finally {
@@ -74,15 +109,48 @@ export default function TunnelsPage() {
     }
 
     try {
+      const body: any = {
+        domain: formData.domain,
+        target: formData.target,
+        agentId: formData.agentId,
+        httpProxyEnabled: formData.httpProxyEnabled,
+        socksProxyEnabled: formData.socksProxyEnabled,
+      }
+      if (formData.dnsSyncEnabled) {
+        if (!formData.dnsZoneId) {
+          alert('Please select a DNS zone')
+          return
+        }
+        body.dnsSync = {
+          enabled: true,
+          zoneId: formData.dnsZoneId,
+          recordType: 'A',
+          strategy: formData.dnsStrategy,
+          ttl: Number(formData.dnsTtl || 60),
+          proxied: formData.dnsProxied,
+        }
+      }
+
       const res = await fetch('/api/tunnels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(body),
       })
 
       if (!res.ok) throw new Error('Failed to create tunnel')
 
-      setFormData({ domain: '', target: '', agentId: '', httpProxyEnabled: false, socksProxyEnabled: false })
+      setFormData({
+        domain: '',
+        target: '',
+        agentId: '',
+        httpProxyEnabled: false,
+        socksProxyEnabled: false,
+        dnsSyncEnabled: false,
+        dnsZoneId: '',
+        dnsStrategy: 'all_gateways',
+        dnsTtl: '60',
+        dnsProxied: false,
+      })
       setShowNewForm(false)
       fetchData()
     } catch (err) {
@@ -117,6 +185,23 @@ export default function TunnelsPage() {
       fetchData()
     } catch (err) {
       alert('Failed to delete tunnel')
+    }
+  }
+
+  async function syncDns(id: string) {
+    try {
+      const res = await fetch('/api/dns/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tunnelId: id }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to sync DNS')
+      }
+      fetchData()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to sync DNS')
     }
   }
 
@@ -193,6 +278,63 @@ export default function TunnelsPage() {
               </label>
             </div>
           </div>
+          <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '0.875rem', marginBottom: '0.5rem', color: '#666' }}>DNS Sync</h3>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginBottom: '1rem' }}>
+              <input
+                type="checkbox"
+                checked={formData.dnsSyncEnabled}
+                onChange={(e) => setFormData({ ...formData, dnsSyncEnabled: e.target.checked })}
+              />
+              <span>Keep this domain pointed at Gateway public IPs</span>
+            </label>
+            {formData.dnsSyncEnabled && (
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label>DNS Zone</label>
+                  <select
+                    value={formData.dnsZoneId}
+                    onChange={(e) => setFormData({ ...formData, dnsZoneId: e.target.value })}
+                  >
+                    <option value="">Select a zone</option>
+                    {zones.filter(zone => zone.enabled).map((zone) => (
+                      <option key={zone.id} value={zone.id}>
+                        {zone.name} ({zone.providerName})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Strategy</label>
+                  <select
+                    value={formData.dnsStrategy}
+                    onChange={(e) => setFormData({ ...formData, dnsStrategy: e.target.value })}
+                  >
+                    <option value="all_gateways">All gateways</option>
+                    <option value="online_gateways">Online gateways</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>TTL</label>
+                  <input
+                    type="number"
+                    min={60}
+                    max={86400}
+                    value={formData.dnsTtl}
+                    onChange={(e) => setFormData({ ...formData, dnsTtl: e.target.value })}
+                  />
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={formData.dnsProxied}
+                    onChange={(e) => setFormData({ ...formData, dnsProxied: e.target.checked })}
+                  />
+                  <span>Cloudflare proxied</span>
+                </label>
+              </div>
+            )}
+          </div>
           <button onClick={createTunnel}>Create Tunnel</button>
         </div>
       )}
@@ -210,6 +352,7 @@ export default function TunnelsPage() {
                 <th>Agent</th>
                 <th>Network</th>
                 <th>Exit Node</th>
+                <th>DNS</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -267,6 +410,32 @@ export default function TunnelsPage() {
                       <span style={{ color: '#999' }}>-</span>
                     )}
                   </td>
+                  <td style={{ fontSize: '0.75rem' }}>
+                    {tunnel.dnsSync ? (
+                      <div>
+                        <div>
+                          <span className={`status ${tunnel.dnsSync.lastError ? 'offline' : 'online'}`}>
+                            {tunnel.dnsSync.lastError ? 'Error' : 'Managed'}
+                          </span>
+                        </div>
+                        <div style={{ color: '#666', marginTop: '0.25rem' }}>
+                          {tunnel.dnsSync.zone.name} via {tunnel.dnsSync.provider.name}
+                        </div>
+                        <div style={{ color: '#666' }}>
+                          {tunnel.dnsSync.lastSyncAt
+                            ? `Last: ${new Date(tunnel.dnsSync.lastSyncAt).toLocaleString()}`
+                            : 'Never synced'}
+                        </div>
+                        {tunnel.dnsSync.lastError && (
+                          <div style={{ color: '#b91c1c', marginTop: '0.25rem' }}>
+                            {tunnel.dnsSync.lastError}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: '#999' }}>Manual</span>
+                    )}
+                  </td>
                   <td>
                     <span className={`status ${tunnel.enabled ? 'online' : 'offline'}`}>
                       {tunnel.enabled ? 'Enabled' : 'Disabled'}
@@ -280,6 +449,14 @@ export default function TunnelsPage() {
                       >
                         {tunnel.enabled ? 'Disable' : 'Enable'}
                       </button>
+                      {tunnel.dnsSync && (
+                        <button
+                          className="secondary"
+                          onClick={() => syncDns(tunnel.id)}
+                        >
+                          Sync DNS
+                        </button>
+                      )}
                       <button
                         className="danger"
                         onClick={() => deleteTunnel(tunnel.id)}

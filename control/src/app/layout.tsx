@@ -24,6 +24,7 @@ export default function RootLayout({
               <li><Link href="/agents">Agents</Link></li>
               <li><Link href="/gateways">Gateways</Link></li>
               <li><Link href="/tunnels">Tunnels</Link></li>
+              <li><Link href="/settings/dns">DNS</Link></li>
               <li><Link href="/settings/tokens">Tokens</Link></li>
             </ul>
           </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tunnels } from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
+import { deleteTunnelDnsRecords, syncTunnelDns } from '@/lib/dns/sync';
 import { updateTunnelSchema } from '@/lib/utils/validation';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
@@ -46,6 +47,12 @@ export async function PATCH(
       }
 
       try {
+        await syncTunnelDns(updatedTunnel.id);
+      } catch (err) {
+        console.error('Failed to sync DNS after tunnel update:', err);
+      }
+
+      try {
         const wsServer = getWebSocketServer();
         if (wsServer) {
           await wsServer.broadcastGatewayConfig();
@@ -75,6 +82,11 @@ export async function DELETE(
   return withAuth(request, 'write', async () => {
     try {
       const { id } = await params;
+      try {
+        await deleteTunnelDnsRecords(id);
+      } catch (err) {
+        console.error('Failed to delete managed DNS records for tunnel:', err);
+      }
       const deleted = await db.delete(tunnels).where(eq(tunnels.id, id)).returning();
       const deletedTunnel = deleted[0];
       if (!deletedTunnel) {

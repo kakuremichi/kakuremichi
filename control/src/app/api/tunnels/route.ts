@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, tunnels, agents, tunnelGatewayIps, gateways } from '@/lib/db';
+import {
+  db,
+  tunnels,
+  agents,
+  tunnelGatewayIps,
+  gateways,
+  dnsProviders,
+  dnsSyncSettings,
+  dnsZones,
+} from '@/lib/db';
 import { getWebSocketServer } from '@/lib/ws';
 import { createTunnelSchema, allocateTunnelSubnetSync, allocateGatewayIpsForTunnel } from '@/lib/utils';
+import { syncTunnelDns } from '@/lib/dns/sync';
 import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/auth';
 
@@ -53,9 +63,36 @@ export async function GET(request: NextRequest) {
         });
       }
 
+      const allDnsSettings = await db
+        .select({
+          tunnelId: dnsSyncSettings.tunnelId,
+          enabled: dnsSyncSettings.enabled,
+          recordType: dnsSyncSettings.recordType,
+          strategy: dnsSyncSettings.strategy,
+          ttl: dnsSyncSettings.ttl,
+          proxied: dnsSyncSettings.proxied,
+          lastSyncAt: dnsSyncSettings.lastSyncAt,
+          lastError: dnsSyncSettings.lastError,
+          zone: {
+            id: dnsZones.id,
+            name: dnsZones.name,
+          },
+          provider: {
+            id: dnsProviders.id,
+            name: dnsProviders.name,
+            type: dnsProviders.type,
+          },
+        })
+        .from(dnsSyncSettings)
+        .innerJoin(dnsZones, eq(dnsSyncSettings.zoneId, dnsZones.id))
+        .innerJoin(dnsProviders, eq(dnsZones.providerId, dnsProviders.id));
+
+      const dnsSyncByTunnel = new Map(allDnsSettings.map((setting) => [setting.tunnelId, setting]));
+
       const tunnelsWithGatewayIps = allTunnels.map(tunnel => ({
         ...tunnel,
         gatewayIps: gatewayIpsByTunnel.get(tunnel.id) || [],
+        dnsSync: dnsSyncByTunnel.get(tunnel.id) || null,
       }));
 
       return NextResponse.json(tunnelsWithGatewayIps);
@@ -71,6 +108,17 @@ export async function POST(request: NextRequest) {
     try {
       const body = await request.json();
       const validatedData = createTunnelSchema.parse(body);
+
+      if (validatedData.dnsSync?.enabled) {
+        const zone = await db
+          .select({ id: dnsZones.id })
+          .from(dnsZones)
+          .where(eq(dnsZones.id, validatedData.dnsSync.zoneId))
+          .limit(1);
+        if (zone.length === 0) {
+          return NextResponse.json({ error: 'DNS zone not found' }, { status: 404 });
+        }
+      }
 
       const result = db.transaction((tx) => {
         const agentRow = tx
@@ -100,6 +148,21 @@ export async function POST(request: NextRequest) {
           })
           .returning()
           .get();
+
+        if (validatedData.dnsSync?.enabled) {
+          tx.insert(dnsSyncSettings)
+            .values({
+              tunnelId: inserted.id,
+              zoneId: validatedData.dnsSync.zoneId,
+              enabled: validatedData.dnsSync.enabled,
+              recordType: validatedData.dnsSync.recordType,
+              strategy: validatedData.dnsSync.strategy,
+              ttl: validatedData.dnsSync.ttl,
+              proxied: validatedData.dnsSync.proxied,
+            })
+            .run();
+        }
+
         return { tunnel: inserted, subnet: subnetAllocation.subnet };
       });
 
@@ -109,6 +172,13 @@ export async function POST(request: NextRequest) {
       const createdTunnel = result.tunnel;
       if (createdTunnel) {
         await allocateGatewayIpsForTunnel(createdTunnel.id, result.subnet);
+        if (validatedData.dnsSync?.enabled) {
+          try {
+            await syncTunnelDns(createdTunnel.id);
+          } catch (err) {
+            console.error('Failed to sync DNS for new tunnel:', err);
+          }
+        }
       }
 
       try {

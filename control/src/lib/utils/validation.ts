@@ -73,6 +73,17 @@ export const createTunnelSchema = z.object({
   // Exit Node (Outbound Proxy) settings
   httpProxyEnabled: z.boolean().optional().default(false),
   socksProxyEnabled: z.boolean().optional().default(false),
+  // DNS Sync settings
+  dnsSync: z
+    .object({
+      enabled: z.boolean().optional().default(true),
+      zoneId: z.string().uuid('Invalid DNS zone ID'),
+      recordType: z.enum(['A']).optional().default('A'),
+      strategy: z.enum(['all_gateways', 'online_gateways']).optional().default('all_gateways'),
+      ttl: z.number().int().min(60).max(86400).optional().default(60),
+      proxied: z.boolean().optional().default(false),
+    })
+    .optional(),
 });
 
 /**
