@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Background, MarkerType, Position, ReactFlow, type Edge, type Node } from '@xyflow/react'
+import { Background, Controls, MarkerType, MiniMap, Position, ReactFlow, type Edge, type Node } from '@xyflow/react'
 
 interface GatewayIP {
   gatewayId: string
@@ -1150,8 +1150,22 @@ function Topology({
     ? `${activeCount} active / weight ${totalActiveWeight}`
     : 'No selectable backend'
   const graphRows = Math.max(displayRows.length, 1)
-  const poolHeight = 70 + graphRows * 96
-  const graphHeight = Math.max(300, poolHeight + 46)
+  const rowGap = 108
+  const rowStartY = 82
+  const rowCenterOffset = 38
+  const backendPoolX = 560
+  const backendPoolY = 22
+  const backendPoolWidth = 376
+  const agentX = 20
+  const agentWidth = 136
+  const serviceX = 216
+  const serviceWidth = 140
+  const poolHeight = rowStartY + graphRows * rowGap + 22
+  const graphHeight = Math.max(420, poolHeight + 96)
+  const trafficCenterY = backendPoolY + rowStartY + rowCenterOffset + ((graphRows - 1) * rowGap) / 2
+  const clientY = Math.max(44, trafficCenterY - 34)
+  const gatewayY = Math.max(30, trafficCenterY - 78)
+  const loadBalancerY = Math.max(44, trafficCenterY - 44)
 
   function getBackendState(row: (typeof backendRows)[number]) {
     if (!row.backend.enabled) return 'disabled'
@@ -1168,7 +1182,7 @@ function Topology({
     {
       id: 'client',
       type: 'input',
-      position: { x: 0, y: 88 },
+      position: { x: 0, y: clientY },
       sourcePosition: Position.Right,
       data: {
         label: (
@@ -1182,7 +1196,7 @@ function Topology({
     },
     {
       id: 'gateway-pool',
-      position: { x: 140, y: 52 },
+      position: { x: 150, y: gatewayY },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       data: {
@@ -1211,11 +1225,11 @@ function Topology({
       className: 'topology-flow-node',
       draggable: false,
       selectable: false,
-      style: { width: 160 },
+      style: { width: 176 },
     },
     {
       id: 'load-balancer',
-      position: { x: 330, y: 82 },
+      position: { x: 362, y: loadBalancerY },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       data: {
@@ -1232,17 +1246,17 @@ function Topology({
       className: 'topology-flow-node',
       draggable: false,
       selectable: false,
-      style: { width: 142 },
+      style: { width: 156 },
     },
     {
       id: 'backend-pool',
       type: 'group',
-      position: { x: 500, y: 18 },
+      position: { x: backendPoolX, y: backendPoolY },
       data: { label: <></> },
       className: 'topology-flow-pool',
       draggable: false,
       selectable: false,
-      style: { width: 340, height: poolHeight },
+      style: { width: backendPoolWidth, height: poolHeight },
     },
     {
       id: 'backend-pool-header',
@@ -1260,7 +1274,7 @@ function Topology({
       className: 'topology-flow-node topology-flow-header-node',
       draggable: false,
       selectable: false,
-      style: { width: 308 },
+      style: { width: backendPoolWidth - 32 },
     },
   ]
 
@@ -1270,12 +1284,12 @@ function Topology({
     const share = backendActive && totalActiveWeight > 0
       ? Math.round((row.weight / totalActiveWeight) * 100)
       : 0
-    const y = 70 + index * 96
+    const y = rowStartY + index * rowGap
 
     nodes.push(
       {
         id: `agent-${row.backend.id}`,
-        position: { x: 14, y },
+        position: { x: agentX, y },
         parentId: 'backend-pool',
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
@@ -1294,11 +1308,11 @@ function Topology({
         className: 'topology-flow-node',
         draggable: false,
         selectable: false,
-        style: { width: 128 },
+        style: { width: agentWidth },
       },
       {
         id: `service-${row.backend.id}`,
-        position: { x: 188, y },
+        position: { x: serviceX, y },
         parentId: 'backend-pool',
         targetPosition: Position.Left,
         data: {
@@ -1314,7 +1328,7 @@ function Topology({
         className: 'topology-flow-node',
         draggable: false,
         selectable: false,
-        style: { width: 136 },
+        style: { width: serviceWidth },
       }
     )
   })
@@ -1350,15 +1364,15 @@ function Topology({
         id: `lb-agent-${row.backend.id}`,
         source: 'load-balancer',
         target: `agent-${row.backend.id}`,
-        type: 'smoothstep',
+        type: 'bezier',
         animated: backendActive && activeCount > 1,
         label: backendActive ? `${share}%` : backendState,
-        labelBgPadding: [6, 4],
+        labelBgPadding: [5, 3],
         labelBgBorderRadius: 6,
         labelBgStyle: { fill: backendActive ? '#dcfce7' : '#f1f5f9' },
         labelStyle: {
           fill: backendActive ? '#166534' : '#64748b',
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: 800,
         },
         markerEnd: { type: MarkerType.ArrowClosed },
@@ -1370,7 +1384,7 @@ function Topology({
         id: `agent-service-${row.backend.id}`,
         source: `agent-${row.backend.id}`,
         target: `service-${row.backend.id}`,
-        type: 'smoothstep',
+        type: 'straight',
         markerEnd: { type: MarkerType.ArrowClosed },
         className: backendActive
           ? 'topology-flow-edge topology-flow-edge-service'
@@ -1383,21 +1397,35 @@ function Topology({
     <div className="topology-map topology-flow-wrap" aria-label="Tunnel topology">
       <div className="topology-flow" style={{ height: graphHeight }}>
         <ReactFlow
+          key={tunnel.id}
           nodes={nodes}
           edges={edges}
           fitView
-          fitViewOptions={{ padding: 0.03 }}
-          minZoom={0.55}
-          maxZoom={1.15}
+          fitViewOptions={{ padding: 0.1 }}
+          minZoom={0.25}
+          maxZoom={1.6}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={false}
-          panOnDrag={false}
+          panOnDrag
           zoomOnScroll={false}
-          zoomOnPinch={false}
+          zoomOnPinch
+          zoomOnDoubleClick
           preventScrolling={false}
           proOptions={{ hideAttribution: true }}
         >
+          <MiniMap
+            pannable
+            zoomable
+            nodeStrokeWidth={2}
+            maskColor="rgba(241, 245, 249, 0.72)"
+            className="topology-flow-minimap"
+          />
+          <Controls
+            showInteractive={false}
+            position="bottom-left"
+            className="topology-flow-controls"
+          />
           <Background color="#e2e8f0" gap={24} size={1} />
         </ReactFlow>
       </div>

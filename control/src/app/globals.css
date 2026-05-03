@@ -836,7 +836,7 @@ ul {
 }
 
 .topology-flow {
-  min-height: 300px;
+  min-height: 360px;
   overflow: hidden;
   border-radius: 8px;
   background:
@@ -845,7 +845,55 @@ ul {
 }
 
 .topology-flow .react-flow__pane {
-  cursor: default;
+  cursor: grab;
+}
+
+.topology-flow .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.topology-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.topology-flow .react-flow__controls-button {
+  width: 2rem;
+  height: 2rem;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  color: #334155;
+}
+
+.topology-flow .react-flow__controls-button:hover {
+  background: #f8fafc;
+}
+
+.topology-flow .react-flow__controls-button svg {
+  max-width: 0.95rem;
+  max-height: 0.95rem;
+}
+
+.topology-flow .react-flow__minimap {
+  width: 7.5rem;
+  height: 5rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.topology-flow .react-flow__minimap-mask {
+  fill: rgba(241, 245, 249, 0.72);
+}
+
+.topology-flow .react-flow__minimap-node {
+  fill: #cbd5e1;
+  stroke: #64748b;
 }
 
 .topology-flow .react-flow__node-default,
@@ -865,6 +913,10 @@ ul {
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(240, 253, 244, 0.82), rgba(255, 255, 255, 0.95));
   box-shadow: inset 0 0 0 1px rgba(22, 101, 52, 0.04);
+}
+
+.topology-flow .react-flow__edges {
+  overflow: visible;
 }
 
 .topology-flow-card {
@@ -1037,7 +1089,7 @@ ul {
 
 .topology-flow .react-flow__edge.topology-flow-edge-active .react-flow__edge-path {
   stroke: #16a34a;
-  stroke-width: 2.6;
+  stroke-width: 2.4;
 }
 
 .topology-flow .react-flow__edge.topology-flow-edge-service .react-flow__edge-path {
@@ -1053,6 +1105,12 @@ ul {
 
 .topology-flow .react-flow__edge-text {
   font-family: inherit;
+}
+
+.topology-flow .react-flow__edge-textbg {
+  fill-opacity: 0.96;
+  stroke: #ffffff;
+  stroke-width: 1;
 }
 
 .topology-overview {
