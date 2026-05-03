@@ -15,6 +15,13 @@ interface Agent {
 interface CreatedAgentCredential {
   name: string
   apiKey: string
+  connection: ControlConnectionConfig
+}
+
+interface ControlConnectionConfig {
+  controlBaseUrl: string
+  websocketUrl: string
+  wsPath: string
 }
 
 export default function AgentsPage() {
@@ -24,9 +31,11 @@ export default function AgentsPage() {
   const [showNewForm, setShowNewForm] = useState(false)
   const [newAgentName, setNewAgentName] = useState('')
   const [createdCredential, setCreatedCredential] = useState<CreatedAgentCredential | null>(null)
+  const [connectionConfig, setConnectionConfig] = useState<ControlConnectionConfig | null>(null)
 
   useEffect(() => {
     fetchAgents()
+    fetchConnectionConfig()
   }, [])
 
   async function fetchAgents() {
@@ -39,6 +48,16 @@ export default function AgentsPage() {
       setError('Failed to load agents')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function fetchConnectionConfig() {
+    try {
+      const res = await fetch('/api/settings/control')
+      if (!res.ok) return
+      setConnectionConfig(await res.json())
+    } catch {
+      // Provisioning commands can still be shown after create because the API returns them.
     }
   }
 
@@ -58,7 +77,15 @@ export default function AgentsPage() {
       if (!res.ok) throw new Error('Failed to create agent')
       const created = await res.json()
 
-      setCreatedCredential({ name: created.name, apiKey: created.apiKey })
+      setCreatedCredential({
+        name: created.name,
+        apiKey: created.apiKey,
+        connection: created.connection || connectionConfig || {
+          controlBaseUrl: 'http://localhost:3000',
+          websocketUrl: 'ws://localhost:3000/ws',
+          wsPath: '/ws',
+        },
+      })
       setNewAgentName('')
       setShowNewForm(false)
       fetchAgents()
@@ -96,7 +123,7 @@ export default function AgentsPage() {
 
       {createdCredential && (
         <div className="card" style={{ marginBottom: '2rem', borderLeft: '4px solid #f59e0b' }}>
-          <h2>New Agent API Key</h2>
+          <h2>New Agent Connection</h2>
           <p style={{ color: '#92400e', marginBottom: '1rem' }}>
             Save this key now. It is shown only after creation.
           </p>
@@ -104,9 +131,33 @@ export default function AgentsPage() {
           <code style={{ display: 'block', padding: '0.75rem', background: '#f3f4f6', wordBreak: 'break-all' }}>
             {createdCredential.apiKey}
           </code>
+          <div className="provisioning-grid" style={{ marginTop: '1rem' }}>
+            <ProvisioningBlock
+              title="agent.env"
+              value={[
+                `CONTROL_URL=${createdCredential.connection.websocketUrl}`,
+                `API_KEY=${createdCredential.apiKey}`,
+              ].join('\n')}
+            />
+            <ProvisioningBlock
+              title="Run command"
+              value={[
+                './agent',
+                `--control-url=${createdCredential.connection.websocketUrl}`,
+                `--api-key=${createdCredential.apiKey}`,
+              ].join(' ')}
+            />
+          </div>
           <button className="secondary" style={{ marginTop: '1rem' }} onClick={() => setCreatedCredential(null)}>
             Dismiss
           </button>
+        </div>
+      )}
+
+      {connectionConfig && !createdCredential && (
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <h2>Agent connection template</h2>
+          <p className="muted-line">New Agents will connect to <code>{connectionConfig.websocketUrl}</code>.</p>
         </div>
       )}
 
@@ -174,6 +225,22 @@ export default function AgentsPage() {
           </table>
         )}
       </div>
+    </div>
+  )
+}
+
+function ProvisioningBlock({ title, value }: { title: string; value: string }) {
+  async function copy() {
+    await navigator.clipboard?.writeText(value)
+  }
+
+  return (
+    <div className="provisioning-block">
+      <div className="provisioning-block-header">
+        <span>{title}</span>
+        <button type="button" className="secondary" onClick={copy}>Copy</button>
+      </div>
+      <pre>{value}</pre>
     </div>
   )
 }

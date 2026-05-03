@@ -38,6 +38,8 @@ Errors use a stable shape:
 
 Agent and Gateway API keys are secret values. List/detail endpoints return only
 `apiKeyPrefix`; the full `apiKey` is returned only from the create response.
+Agent and Gateway create responses also include `connection.websocketUrl`, which
+is derived from `Settings > Control` and is intended for provisioning config.
 
 ## OpenAPI
 
@@ -66,6 +68,11 @@ updating the certificate's `dnsZoneId` before the next renewal.
 account key, certificate chain, and certificate private key encrypted at rest.
 Set `CONTROL_ACME_STAGING=true` for staging certificates.
 
+Control itself should be exposed through HTTPS in production, usually by placing
+Caddy or another reverse proxy in front of the Node server. Store the public URL
+with `PUT /api/settings/control` or from `Settings > Control`; Agents and
+Gateways will then receive `wss://.../ws` in generated setup commands.
+
 ## Examples
 
 Create an Agent:
@@ -75,6 +82,17 @@ curl -X POST http://localhost:3000/api/agents \
   -H "Authorization: Bearer kmt_xxx" \
   -H "Content-Type: application/json" \
   -d '{"name":"agent-1"}'
+```
+
+Read or update the public Control endpoint used for provisioning:
+
+```bash
+curl -H "Authorization: Bearer kmt_xxx" http://localhost:3000/api/settings/control
+
+curl -X PUT http://localhost:3000/api/settings/control \
+  -H "Authorization: Bearer kmt_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"controlBaseUrl":"https://control.example.com"}'
 ```
 
 Create a Gateway:

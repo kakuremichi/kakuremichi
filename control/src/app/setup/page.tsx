@@ -8,15 +8,21 @@ export default function SetupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [controlBaseUrl, setControlBaseUrl] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [allowed, setAllowed] = useState<boolean | null>(null)
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setControlBaseUrl(window.location.origin)
+    }
+
     fetch('/api/auth/setup')
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d?.needsSetup) {
+          if (d.control?.controlBaseUrl) setControlBaseUrl(d.control.controlBaseUrl)
           setAllowed(true)
         } else {
           setAllowed(false)
@@ -42,7 +48,7 @@ export default function SetupPage() {
       const res = await fetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, controlBaseUrl }),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
@@ -62,11 +68,11 @@ export default function SetupPage() {
   if (allowed === false) return null
 
   return (
-    <div style={{ maxWidth: '480px', margin: '4rem auto' }}>
+    <div style={{ maxWidth: '520px', margin: '4rem auto' }}>
       <div className="card">
         <h1>Initial setup</h1>
         <p style={{ color: '#666', marginBottom: '1.5rem' }}>
-          Create the first admin account. This account will have full control over kakuremichi.
+          Create the first admin account and set the public Control endpoint used by Agents and Gateways.
         </p>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -101,9 +107,23 @@ export default function SetupPage() {
               autoComplete="new-password"
             />
           </div>
+          <div className="form-group">
+            <label>Control public URL</label>
+            <input
+              type="url"
+              required
+              value={controlBaseUrl}
+              onChange={e => setControlBaseUrl(e.target.value)}
+              placeholder="https://control.example.com"
+              autoComplete="url"
+            />
+            <small style={{ color: '#64748b' }}>
+              Agent and Gateway setup commands will use this URL as the WebSocket endpoint.
+            </small>
+          </div>
           {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
           <button type="submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create admin account'}
+            {submitting ? 'Creating...' : 'Create admin account'}
           </button>
         </form>
       </div>

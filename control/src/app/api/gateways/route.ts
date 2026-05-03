@@ -7,6 +7,7 @@ import { syncAllDnsSettings } from '@/lib/dns/sync';
 import { withAuth } from '@/lib/auth';
 import { gatewayResource } from '@/lib/api/resources';
 import { apiCreated, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
+import { getControlConnectionConfig, requestOrigin } from '@/lib/settings/control-url';
 
 export async function GET(request: NextRequest) {
   return withAuth(request, 'read', async () => {
@@ -61,7 +62,10 @@ export async function POST(request: NextRequest) {
       if (!createdGateway) {
         throw new Error('Gateway insert returned no row');
       }
-      return apiCreated(gatewayResource(createdGateway, { includeApiKey: true }));
+      return apiCreated({
+        ...gatewayResource(createdGateway, { includeApiKey: true }),
+        connection: await getControlConnectionConfig(requestOrigin(request)),
+      });
     } catch (error) {
       console.error('Failed to create gateway:', error);
       return apiRouteError(error, 'Failed to create gateway');

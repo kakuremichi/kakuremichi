@@ -11,6 +11,7 @@ const navItems = [
   { href: '/agents', label: 'Agents', description: 'Origins' },
   { href: '/gateways', label: 'Gateways', description: 'Edge nodes' },
   { href: '/tunnels', label: 'Tunnels', description: 'Routes' },
+  { href: '/settings/control', label: 'Control', description: 'Endpoint' },
   { href: '/settings/dns', label: 'DNS', description: 'Sync' },
   { href: '/settings/certificates', label: 'Certificates', description: 'TLS' },
   { href: '/settings/tokens', label: 'Tokens', description: 'API access' },

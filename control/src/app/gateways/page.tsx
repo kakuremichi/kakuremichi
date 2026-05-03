@@ -17,6 +17,13 @@ interface Gateway {
 interface CreatedGatewayCredential {
   name: string
   apiKey: string
+  connection: ControlConnectionConfig
+}
+
+interface ControlConnectionConfig {
+  controlBaseUrl: string
+  websocketUrl: string
+  wsPath: string
 }
 
 interface GatewayMetadata {
@@ -45,9 +52,11 @@ export default function GatewaysPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ publicIp: '' })
   const [createdCredential, setCreatedCredential] = useState<CreatedGatewayCredential | null>(null)
+  const [connectionConfig, setConnectionConfig] = useState<ControlConnectionConfig | null>(null)
 
   useEffect(() => {
     fetchGateways()
+    fetchConnectionConfig()
   }, [])
 
   async function fetchGateways() {
@@ -60,6 +69,16 @@ export default function GatewaysPage() {
       setError('Failed to load gateways')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function fetchConnectionConfig() {
+    try {
+      const res = await fetch('/api/settings/control')
+      if (!res.ok) return
+      setConnectionConfig(await res.json())
+    } catch {
+      // Provisioning commands can still be shown after create because the API returns them.
     }
   }
 
@@ -79,7 +98,15 @@ export default function GatewaysPage() {
       if (!res.ok) throw new Error('Failed to create gateway')
       const created = await res.json()
 
-      setCreatedCredential({ name: created.name, apiKey: created.apiKey })
+      setCreatedCredential({
+        name: created.name,
+        apiKey: created.apiKey,
+        connection: created.connection || connectionConfig || {
+          controlBaseUrl: 'http://localhost:3000',
+          websocketUrl: 'ws://localhost:3000/ws',
+          wsPath: '/ws',
+        },
+      })
       setNewGatewayName('')
       setShowNewForm(false)
       fetchGateways()
@@ -160,7 +187,7 @@ export default function GatewaysPage() {
 
       {createdCredential && (
         <div className="card" style={{ marginBottom: '2rem', borderLeft: '4px solid #f59e0b' }}>
-          <h2>New Gateway API Key</h2>
+          <h2>New Gateway Connection</h2>
           <p style={{ color: '#92400e', marginBottom: '1rem' }}>
             Save this key now. It is shown only after creation.
           </p>
@@ -168,9 +195,35 @@ export default function GatewaysPage() {
           <code style={{ display: 'block', padding: '0.75rem', background: '#f3f4f6', wordBreak: 'break-all' }}>
             {createdCredential.apiKey}
           </code>
+          <div className="provisioning-grid" style={{ marginTop: '1rem' }}>
+            <ProvisioningBlock
+              title="gateway.env"
+              value={[
+                `CONTROL_URL=${createdCredential.connection.websocketUrl}`,
+                `API_KEY=${createdCredential.apiKey}`,
+                'PUBLIC_IP=auto',
+              ].join('\n')}
+            />
+            <ProvisioningBlock
+              title="Run command"
+              value={[
+                './gateway',
+                `--control-url=${createdCredential.connection.websocketUrl}`,
+                `--api-key=${createdCredential.apiKey}`,
+                '--public-ip=auto',
+              ].join(' ')}
+            />
+          </div>
           <button className="secondary" style={{ marginTop: '1rem' }} onClick={() => setCreatedCredential(null)}>
             Dismiss
           </button>
+        </div>
+      )}
+
+      {connectionConfig && !createdCredential && (
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <h2>Gateway connection template</h2>
+          <p className="muted-line">New Gateways will connect to <code>{connectionConfig.websocketUrl}</code>.</p>
         </div>
       )}
 
@@ -293,6 +346,22 @@ export default function GatewaysPage() {
           </table>
         )}
       </div>
+    </div>
+  )
+}
+
+function ProvisioningBlock({ title, value }: { title: string; value: string }) {
+  async function copy() {
+    await navigator.clipboard?.writeText(value)
+  }
+
+  return (
+    <div className="provisioning-block">
+      <div className="provisioning-block-header">
+        <span>{title}</span>
+        <button type="button" className="secondary" onClick={copy}>Copy</button>
+      </div>
+      <pre>{value}</pre>
     </div>
   )
 }

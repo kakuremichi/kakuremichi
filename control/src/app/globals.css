@@ -560,6 +560,15 @@ label {
   padding: 0.85rem 1rem;
 }
 
+.success {
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: var(--success-soft);
+  color: var(--success);
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+}
+
 .auth-badge {
   margin-bottom: 1rem;
   border: 1px solid var(--line);
@@ -581,6 +590,65 @@ code {
   font-size: 0.82rem;
   line-height: 1.35;
   padding: 0.2rem 0.45rem;
+}
+
+.provisioning-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.provisioning-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+}
+
+.provisioning-code {
+  display: block;
+  padding: 0.65rem 0.75rem;
+}
+
+.provisioning-block {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.provisioning-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.65rem 0.75rem;
+}
+
+.provisioning-block-header span {
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.provisioning-block-header button {
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.provisioning-block pre {
+  margin: 0;
+  overflow-x: auto;
+  color: #0f172a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 ul {
@@ -1670,6 +1738,7 @@ ul {
   }
 
   .detail-grid,
+  .provisioning-grid,
   .tunnel-form-grid,
   .tunnel-form-grid.compact {
     grid-template-columns: 1fr;

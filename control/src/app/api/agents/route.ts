@@ -6,6 +6,7 @@ import { generateAgentApiKey } from '@/lib/utils';
 import { withAuth } from '@/lib/auth';
 import { agentResource } from '@/lib/api/resources';
 import { apiCreated, apiJson, apiRouteError, readJsonBody } from '@/lib/api/response';
+import { getControlConnectionConfig, requestOrigin } from '@/lib/settings/control-url';
 
 export async function GET(request: NextRequest) {
   return withAuth(request, 'read', async () => {
@@ -51,7 +52,10 @@ export async function POST(request: NextRequest) {
       if (!createdAgent) {
         throw new Error('Agent insert returned no row');
       }
-      return apiCreated(agentResource(createdAgent, { includeApiKey: true }));
+      return apiCreated({
+        ...agentResource(createdAgent, { includeApiKey: true }),
+        connection: await getControlConnectionConfig(requestOrigin(request)),
+      });
     } catch (error) {
       console.error('Failed to create agent:', error);
       return apiRouteError(error, 'Failed to create agent');

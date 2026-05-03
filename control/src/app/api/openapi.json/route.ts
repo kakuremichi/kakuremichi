@@ -191,6 +191,23 @@ const openApiDocument = {
       Error: errorSchema,
       Agent: agentSchema,
       Gateway: gatewaySchema,
+      ControlConnection: {
+        type: 'object',
+        required: ['controlBaseUrl', 'websocketUrl', 'wsPath'],
+        properties: {
+          controlBaseUrl: { type: 'string', format: 'uri' },
+          websocketUrl: { type: 'string', format: 'uri' },
+          wsPath: { type: 'string' },
+        },
+      },
+      ControlSettingsUpdate: {
+        type: 'object',
+        required: ['controlBaseUrl'],
+        additionalProperties: false,
+        properties: {
+          controlBaseUrl: { type: 'string', format: 'uri' },
+        },
+      },
       Tunnel: tunnelSchema,
       TunnelBackend: tunnelBackendSchema,
       Certificate: certificateSchema,
@@ -335,6 +352,30 @@ const openApiDocument = {
         responses: { '200': { description: 'Token revoked' } },
       },
     },
+    '/api/settings/control': {
+      get: {
+        summary: 'Get Control public endpoint settings',
+        responses: {
+          '200': {
+            description: 'Control endpoint values used by Agent and Gateway provisioning',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ControlConnection' } } },
+          },
+        },
+      },
+      put: {
+        summary: 'Update Control public endpoint settings',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ControlSettingsUpdate' } } },
+        },
+        responses: {
+          '200': {
+            description: 'Updated Control endpoint values',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ControlConnection' } } },
+          },
+        },
+      },
+    },
     '/api/agents': {
       get: {
         summary: 'List agents',
@@ -351,7 +392,7 @@ const openApiDocument = {
       },
       post: {
         summary: 'Create an agent',
-        description: 'The Agent API key is returned only in this creation response.',
+        description: 'The Agent API key and Control connection values are returned only in this creation response.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/AgentCreate' } } },
@@ -405,7 +446,7 @@ const openApiDocument = {
       },
       post: {
         summary: 'Create a gateway',
-        description: 'The Gateway API key is returned only in this creation response.',
+        description: 'The Gateway API key and Control connection values are returned only in this creation response.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/GatewayCreate' } } },
